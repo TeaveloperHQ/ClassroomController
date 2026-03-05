@@ -1,6 +1,8 @@
 package com.yourname.classroomcontroller
 
 import android.app.AlertDialog
+import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.os.Bundle
@@ -9,6 +11,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
+import com.google.android.material.bottomsheet.BottomSheetDialog
 import org.java_websocket.client.WebSocketClient
 import org.java_websocket.handshake.ServerHandshake
 import java.net.URI
@@ -16,12 +19,11 @@ import java.net.URI
 class MainActivity : AppCompatActivity() {
 
     // address (IP:port) -> deviceName
-    private val agentMap = mutableMapOf<String, String>()
-    // displayList와 인덱스를 동기화하는 주소 순서 리스트 (정렬 시 함께 재배열)
+    private val agentMap     = mutableMapOf<String, String>()
     private val addressOrder = mutableListOf<String>()
-    private val displayList = mutableListOf<String>()
+    private val displayList  = mutableListOf<String>()
     // address -> checked (true = 포함, false = 제외)
-    private val checkedMap = mutableMapOf<String, Boolean>()
+    private val checkedMap   = mutableMapOf<String, Boolean>()
     // 학적 수정 요청 대기열 (순서대로 팝업 표시, 중복 주소 불허)
     private val editRequestQueue = ArrayDeque<String>()
     private var editRequestDialogActive = false
@@ -39,7 +41,19 @@ class MainActivity : AppCompatActivity() {
     private lateinit var deviceAdapter: DeviceAdapter
 
     // ──────────────────────────────────────────────
-    // 커스텀 어댑터 (체크박스 포함)
+    // 상태 색상
+    // ──────────────────────────────────────────────
+
+    private fun statusColorFor(displayStr: String): Int = when {
+        "❌ 통신 끊김" in displayStr -> Color.parseColor("#d32f2f")
+        "⚠️" in displayStr          -> Color.parseColor("#e65100")
+        "대기중" in displayStr       -> Color.parseColor("#9e9e9e")
+        "연결 확인중" in displayStr  -> Color.parseColor("#9e9e9e")
+        else                         -> Color.parseColor("#2e7d32")
+    }
+
+    // ──────────────────────────────────────────────
+    // 커스텀 어댑터 (CardView + 체크박스 + 상태 색상)
     // ──────────────────────────────────────────────
 
     inner class DeviceAdapter : BaseAdapter() {
@@ -52,11 +66,30 @@ class MainActivity : AppCompatActivity() {
                 ?: LayoutInflater.from(this@MainActivity)
                     .inflate(R.layout.list_item_device, parent, false)
 
-            val cbDevice = view.findViewById<CheckBox>(R.id.cbDevice)
-            val tvDeviceInfo = view.findViewById<TextView>(R.id.tvDeviceInfo)
+            val cbDevice       = view.findViewById<CheckBox>(R.id.cbDevice)
+            val tvDeviceName   = view.findViewById<TextView>(R.id.tvDeviceName)
+            val tvDeviceStatus = view.findViewById<TextView>(R.id.tvDeviceStatus)
+            val viewBorder     = view.findViewById<View>(R.id.viewStatusBorder)
+            val viewDot        = view.findViewById<View>(R.id.viewStatusDot)
 
             val address = addressOrder[position]
-            tvDeviceInfo.text = displayList[position]
+            val full    = displayList[position]
+
+            // displayList 형식: "[📝 ]기기명 | 상태 | ..." 또는 "기기명 | ❌ 통신 끊김"
+            val sepIdx     = full.indexOf(" | ")
+            val namePart   = if (sepIdx >= 0) full.substring(0, sepIdx) else full
+            val statusPart = if (sepIdx >= 0) full.substring(sepIdx + 3) else ""
+
+            tvDeviceName.text   = namePart
+            tvDeviceStatus.text = statusPart
+
+            val color = statusColorFor(full)
+            viewBorder.setBackgroundColor(color)
+            tvDeviceStatus.setTextColor(color)
+            viewDot.background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(color)
+            }
 
             // 리스너 먼저 제거 후 상태 설정 (recycled view 오작동 방지)
             cbDevice.setOnCheckedChangeListener(null)
@@ -74,82 +107,62 @@ class MainActivity : AppCompatActivity() {
     // ──────────────────────────────────────────────
 
     private fun getFilterPrefix(): String {
-        val prefs = getSharedPreferences("classroom", MODE_PRIVATE)
-        val grade = prefs.getInt("grade", 1)
+        val prefs    = getSharedPreferences("classroom", MODE_PRIVATE)
+        val grade    = prefs.getInt("grade", 1)
         val classNum = prefs.getString("class_num", "01") ?: "01"
         return "$grade$classNum"
     }
 
     private fun showClassroomSetupDialog(cancelable: Boolean = true) {
-        val grades = arrayOf("1", "2", "3")
+        val grades  = arrayOf("1", "2", "3")
         val classes = Array(20) { i -> String.format("%02d", i + 1) }
 
-        val prefs = getSharedPreferences("classroom", MODE_PRIVATE)
+        val prefs        = getSharedPreferences("classroom", MODE_PRIVATE)
         val currentGrade = prefs.getInt("grade", 1)
         val currentClass = prefs.getString("class_num", "01") ?: "01"
 
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(64, 32, 64, 32)
+        val sheet     = BottomSheetDialog(this)
+        val sheetView = LayoutInflater.from(this)
+            .inflate(R.layout.dialog_classroom_setup, null)
+
+        val spinnerGrade = sheetView.findViewById<Spinner>(R.id.spinnerGrade)
+        val spinnerClass = sheetView.findViewById<Spinner>(R.id.spinnerClass)
+        val btnConfirm   = sheetView.findViewById<Button>(R.id.btnConfirm)
+
+        spinnerGrade.adapter = ArrayAdapter(
+            this, android.R.layout.simple_spinner_dropdown_item, grades)
+        spinnerGrade.setSelection(currentGrade - 1)
+
+        spinnerClass.adapter = ArrayAdapter(
+            this, android.R.layout.simple_spinner_dropdown_item, classes)
+        spinnerClass.setSelection(classes.indexOf(currentClass).coerceAtLeast(0))
+
+        btnConfirm.setOnClickListener {
+            val grade    = grades[spinnerGrade.selectedItemPosition].toInt()
+            val classNum = classes[spinnerClass.selectedItemPosition]
+            prefs.edit()
+                .putInt("grade", grade)
+                .putString("class_num", classNum)
+                .putBoolean("filter_set", true)
+                .apply()
+            updateAppBarSubtitle()
+            restartDiscovery()
+            sheet.dismiss()
         }
 
-        val tvGradeLabel = TextView(this).apply {
-            text = "학년"
-            textSize = 16f
-            setPadding(0, 8, 0, 4)
-        }
-        val spinnerGrade = Spinner(this).apply {
-            adapter = ArrayAdapter(
-                this@MainActivity,
-                android.R.layout.simple_spinner_dropdown_item,
-                grades
-            )
-            setSelection(currentGrade - 1)
-        }
-
-        val tvClassLabel = TextView(this).apply {
-            text = "반"
-            textSize = 16f
-            setPadding(0, 16, 0, 4)
-        }
-        val spinnerClass = Spinner(this).apply {
-            adapter = ArrayAdapter(
-                this@MainActivity,
-                android.R.layout.simple_spinner_dropdown_item,
-                classes
-            )
-            setSelection(classes.indexOf(currentClass).coerceAtLeast(0))
-        }
-
-        layout.addView(tvGradeLabel)
-        layout.addView(spinnerGrade)
-        layout.addView(tvClassLabel)
-        layout.addView(spinnerClass)
-
-        AlertDialog.Builder(this)
-            .setTitle("교실 설정")
-            .setView(layout)
-            .setCancelable(cancelable)
-            .setPositiveButton("확인") { _, _ ->
-                val grade = grades[spinnerGrade.selectedItemPosition].toInt()
-                val classNum = classes[spinnerClass.selectedItemPosition]
-                prefs.edit()
-                    .putInt("grade", grade)
-                    .putString("class_num", classNum)
-                    .putBoolean("filter_set", true)
-                    .apply()
-                updateClassroomLabel()
-                restartDiscovery()
-            }
-            .show()
+        sheet.setCancelable(cancelable)
+        sheet.setContentView(sheetView)
+        sheet.show()
     }
 
-    private fun updateClassroomLabel() {
-        val prefs = getSharedPreferences("classroom", MODE_PRIVATE)
-        val grade = prefs.getInt("grade", 1)
-        val classNum = prefs.getString("class_num", "01") ?: "01"
+    private fun updateAppBarSubtitle() {
+        val prefs       = getSharedPreferences("classroom", MODE_PRIVATE)
+        val grade       = prefs.getInt("grade", 1)
+        val classNum    = prefs.getString("class_num", "01") ?: "01"
         val classNumInt = classNum.trimStart('0').ifEmpty { "0" }.toInt()
-        findViewById<TextView>(R.id.tvClassroomLabel).text = "${grade}학년 ${classNumInt}반"
+        val count       = agentMap.size
+        findViewById<TextView>(R.id.tvAppBarSubtitle).text =
+            "${grade}학년 ${classNumInt}반 · 태블릿 ${count}대"
     }
 
     private fun restartDiscovery() {
@@ -160,7 +173,7 @@ class MainActivity : AppCompatActivity() {
         editRequestQueue.clear()
         editRequestDialogActive = false
         deviceAdapter.notifyDataSetChanged()
-        findViewById<TextView>(R.id.tvDeviceCount).text = "발견된 태블릿: 0대"
+        updateAppBarSubtitle()
 
         if (discoveryListener != null) {
             try {
@@ -177,7 +190,6 @@ class MainActivity : AppCompatActivity() {
     // 학적 수정 요청
     // ──────────────────────────────────────────────
 
-    // 대기열에 추가하고, 팝업이 없으면 즉시 표시
     private fun enqueueEditRequest(address: String) {
         if (address !in editRequestQueue) {
             editRequestQueue.addLast(address)
@@ -188,14 +200,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showNextEditRequestDialog() {
-        val address = editRequestQueue.firstOrNull() ?: return
+        val address    = editRequestQueue.firstOrNull() ?: return
         val deviceName = agentMap[address] ?: address
         editRequestDialogActive = true
         showEditRequestDialog(address, deviceName)
     }
 
     private fun showEditRequestDialog(address: String, deviceName: String) {
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setTitle("학적 수정 요청")
             .setMessage("$deviceName 학적 수정 요청")
             .setCancelable(false)
@@ -212,6 +224,16 @@ class MainActivity : AppCompatActivity() {
                 showNextEditRequestDialog()
             }
             .show()
+
+        // 버튼 스타일: 허락 = 파란 배경 흰 텍스트, 거절 = 빨간 텍스트만
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.apply {
+            setBackgroundColor(Color.parseColor("#1976d2"))
+            setTextColor(Color.WHITE)
+        }
+        dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.apply {
+            setBackgroundColor(Color.TRANSPARENT)
+            setTextColor(Color.parseColor("#d32f2f"))
+        }
     }
 
     // ──────────────────────────────────────────────
@@ -220,14 +242,25 @@ class MainActivity : AppCompatActivity() {
 
     private fun sortPriority(displayStr: String): Int = when {
         "❌ 통신 끊김" in displayStr -> 0
-        "⚠️접근성" in displayStr -> 1
-        "⚠️오버레이" in displayStr -> 2
-        "대기중" in displayStr -> 3
-        else -> 4
+        "⚠️접근성" in displayStr    -> 1
+        "⚠️오버레이" in displayStr  -> 2
+        "대기중" in displayStr      -> 3
+        else                        -> 4
     }
 
     private fun sortByPriority() {
-        val paired = addressOrder.zip(displayList).sortedBy { (_, display) -> sortPriority(display) }
+        val paired = addressOrder.zip(displayList)
+            .sortedWith(
+                compareBy<Pair<String, String>> { (_, display) -> sortPriority(display) }
+                    .thenBy { (_, display) ->
+                        // 그룹 4(정상 수업중) 내에서만 기기명 오름차순 (학번순)
+                        if (sortPriority(display) == 4) {
+                            val sep = display.indexOf(" | ")
+                            val name = if (sep >= 0) display.substring(0, sep) else display
+                            name.removePrefix("📝 ")
+                        } else ""
+                    }
+            )
         addressOrder.clear()
         displayList.clear()
         paired.forEach { (addr, display) ->
@@ -238,13 +271,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun parseStatusMessage(address: String, message: String): String {
-        val deviceName = agentMap[address] ?: address
-        val parts = message.split("|")
-        val sessionStr = if (parts.getOrNull(0) == "IN_SESSION") "수업중" else "대기중"
-        val accessibilityStr = if (parts.find { it.startsWith("ACCESSIBILITY:") }?.endsWith("true") == true) "✅접근성" else "⚠️접근성"
-        val overlayStr = if (parts.find { it.startsWith("OVERLAY:") }?.endsWith("true") == true) "✅오버레이" else "⚠️오버레이"
-        val editRequest = parts.find { it.startsWith("EDIT_REQUEST:") }?.endsWith("true") == true
-        val prefix = if (editRequest) "📝 " else ""
+        val deviceName       = agentMap[address] ?: address
+        val parts            = message.split("|")
+        val sessionStr       = if (parts.getOrNull(0) == "IN_SESSION") "수업중" else "대기중"
+        val accessibilityStr = if (parts.find { it.startsWith("ACCESSIBILITY:") }
+                ?.endsWith("true") == true) "✅접근성" else "⚠️접근성"
+        val overlayStr       = if (parts.find { it.startsWith("OVERLAY:") }
+                ?.endsWith("true") == true) "✅오버레이" else "⚠️오버레이"
+        val editRequest      = parts.find { it.startsWith("EDIT_REQUEST:") }
+                ?.endsWith("true") == true
+        val prefix           = if (editRequest) "📝 " else ""
         return "$prefix$deviceName | $sessionStr | $accessibilityStr | $overlayStr"
     }
 
@@ -255,7 +291,7 @@ class MainActivity : AppCompatActivity() {
     private fun pollAllAgents() {
         val addresses = addressOrder.toList()
         addresses.forEach { address ->
-            val uri = URI("ws://$address")
+            val uri    = URI("ws://$address")
             val client = object : WebSocketClient(uri) {
                 override fun onOpen(handshake: ServerHandshake) {
                     send("STATUS")
@@ -266,8 +302,9 @@ class MainActivity : AppCompatActivity() {
 
                     val parts = message.split("|")
 
-                    // STATUS 응답에 EDIT_REQUEST:true 포함된 경우 대기열에 추가
-                    val hasEditRequest = parts.find { it.startsWith("EDIT_REQUEST:") }?.endsWith("true") == true
+                    // STATUS 응답에 EDIT_REQUEST:true 포함 시 대기열에 추가
+                    val hasEditRequest = parts.find { it.startsWith("EDIT_REQUEST:") }
+                        ?.endsWith("true") == true
                     if (hasEditRequest) {
                         runOnUiThread { enqueueEditRequest(address) }
                     }
@@ -321,18 +358,17 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        val prefs = getSharedPreferences("classroom", MODE_PRIVATE)
+        val prefs       = getSharedPreferences("classroom", MODE_PRIVATE)
         val isInSession = prefs.getBoolean("isInSession", false)
         updateSessionUI(isInSession)
 
-        nsdManager = getSystemService(NSD_SERVICE) as NsdManager
-
+        nsdManager    = getSystemService(NSD_SERVICE) as NsdManager
         deviceAdapter = DeviceAdapter()
         findViewById<ListView>(R.id.lvDevices).adapter = deviceAdapter
 
         findViewById<Button>(R.id.btnStart).setOnClickListener { sendToAll("START") }
-        findViewById<Button>(R.id.btnStop).setOnClickListener { sendToAll("STOP") }
-        findViewById<Button>(R.id.btnSettings).setOnClickListener {
+        findViewById<Button>(R.id.btnStop).setOnClickListener  { sendToAll("STOP") }
+        findViewById<ImageButton>(R.id.btnSettings).setOnClickListener {
             showClassroomSetupDialog(cancelable = true)
         }
 
@@ -342,7 +378,7 @@ class MainActivity : AppCompatActivity() {
             // 최초 실행: 반드시 교실 설정 후 탐색 시작
             showClassroomSetupDialog(cancelable = false)
         } else {
-            updateClassroomLabel()
+            updateAppBarSubtitle()
             startDiscovery()
         }
     }
@@ -369,8 +405,8 @@ class MainActivity : AppCompatActivity() {
                         android.util.Log.e("mDNS", "주소 확인 실패: $errorCode")
                     }
                     override fun onServiceResolved(info: NsdServiceInfo) {
-                        val ip = info.host.hostAddress ?: return
-                        val address = "$ip:${info.port}"
+                        val ip         = info.host.hostAddress ?: return
+                        val address    = "$ip:${info.port}"
                         val deviceName = info.serviceName
 
                         // 교실 필터: 기기 이름이 {학년}{반} 으로 시작하는 것만 허용
@@ -383,14 +419,13 @@ class MainActivity : AppCompatActivity() {
                         android.util.Log.d("mDNS", "주소 확인됨: $address ($deviceName)")
                         runOnUiThread {
                             if (!agentMap.containsKey(address)) {
-                                agentMap[address] = deviceName
+                                agentMap[address]   = deviceName
                                 checkedMap[address] = true  // 신규 기기는 항상 체크됨
                                 addressOrder.add(address)
                                 displayList.add("$deviceName | 연결 확인중...")
                                 sortByPriority()
                             }
-                            findViewById<TextView>(R.id.tvDeviceCount).text =
-                                "발견된 태블릿: ${agentMap.size}대"
+                            updateAppBarSubtitle()
                             android.util.Log.d("Controller", "리스트 크기: ${agentMap.size}")
                         }
                     }
@@ -400,18 +435,17 @@ class MainActivity : AppCompatActivity() {
             override fun onServiceLost(serviceInfo: NsdServiceInfo) {
                 android.util.Log.d("mDNS", "기기 사라짐: ${serviceInfo.serviceName}")
                 val deviceName = serviceInfo.serviceName
-                val address = agentMap.entries.find { it.value == deviceName }?.key ?: return
+                val address    = agentMap.entries.find { it.value == deviceName }?.key ?: return
                 runOnUiThread {
                     val idx = addressOrder.indexOf(address)
                     if (idx >= 0) {
                         agentMap.remove(address)
-                        checkedMap.remove(address)        // 재연결 시 체크 초기화
+                        checkedMap.remove(address)       // 재연결 시 체크 초기화
                         editRequestQueue.remove(address)
                         addressOrder.removeAt(idx)
                         displayList.removeAt(idx)
                         deviceAdapter.notifyDataSetChanged()
-                        findViewById<TextView>(R.id.tvDeviceCount).text =
-                            "발견된 태블릿: ${agentMap.size}대"
+                        updateAppBarSubtitle()
                     }
                 }
             }
@@ -450,23 +484,25 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateSessionUI(isInSession: Boolean) {
         val btnStart = findViewById<Button>(R.id.btnStart)
-        val btnStop = findViewById<Button>(R.id.btnStop)
+        val btnStop  = findViewById<Button>(R.id.btnStop)
         if (isInSession) {
             btnStart.isEnabled = false
-            btnStop.isEnabled = true
+            btnStart.alpha     = 0.4f
+            btnStop.isEnabled  = true
+            btnStop.alpha      = 1.0f
         } else {
             btnStart.isEnabled = true
-            btnStop.isEnabled = false
+            btnStart.alpha     = 1.0f
+            btnStop.isEnabled  = false
+            btnStop.alpha      = 0.4f
         }
     }
 
     private fun sendCommand(address: String, command: String) {
         android.util.Log.d("Controller", "연결 시도: $address, 명령: $command")
-        val uri = URI("ws://$address")
+        val uri    = URI("ws://$address")
         val client = object : WebSocketClient(uri) {
-            override fun onOpen(handshake: ServerHandshake) {
-                send(command)
-            }
+            override fun onOpen(handshake: ServerHandshake) { send(command) }
             override fun onMessage(message: String) {
                 android.util.Log.d("Controller", "응답: $message")
                 close()
