@@ -4,6 +4,9 @@ import android.app.AlertDialog
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.os.Bundle
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import org.java_websocket.client.WebSocketClient
@@ -12,11 +15,16 @@ import java.net.URI
 
 class MainActivity : AppCompatActivity() {
 
-    // address (IP:port) -> deviceName (조회 전용, 순서 관리 안 함)
+    // address (IP:port) -> deviceName
     private val agentMap = mutableMapOf<String, String>()
     // displayList와 인덱스를 동기화하는 주소 순서 리스트 (정렬 시 함께 재배열)
     private val addressOrder = mutableListOf<String>()
     private val displayList = mutableListOf<String>()
+    // address -> checked (true = 포함, false = 제외)
+    private val checkedMap = mutableMapOf<String, Boolean>()
+    // 학적 수정 요청 대기열 (순서대로 팝업 표시, 중복 주소 불허)
+    private val editRequestQueue = ArrayDeque<String>()
+    private var editRequestDialogActive = false
 
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
     private val pollRunnable = object : Runnable {
@@ -28,7 +36,38 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var nsdManager: NsdManager
     private var discoveryListener: NsdManager.DiscoveryListener? = null
-    private lateinit var deviceAdapter: ArrayAdapter<String>
+    private lateinit var deviceAdapter: DeviceAdapter
+
+    // ──────────────────────────────────────────────
+    // 커스텀 어댑터 (체크박스 포함)
+    // ──────────────────────────────────────────────
+
+    inner class DeviceAdapter : BaseAdapter() {
+        override fun getCount() = addressOrder.size
+        override fun getItem(position: Int): String = displayList[position]
+        override fun getItemId(position: Int) = position.toLong()
+
+        override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+            val view = convertView
+                ?: LayoutInflater.from(this@MainActivity)
+                    .inflate(R.layout.list_item_device, parent, false)
+
+            val cbDevice = view.findViewById<CheckBox>(R.id.cbDevice)
+            val tvDeviceInfo = view.findViewById<TextView>(R.id.tvDeviceInfo)
+
+            val address = addressOrder[position]
+            tvDeviceInfo.text = displayList[position]
+
+            // 리스너 먼저 제거 후 상태 설정 (recycled view 오작동 방지)
+            cbDevice.setOnCheckedChangeListener(null)
+            cbDevice.isChecked = checkedMap.getOrDefault(address, true)
+            cbDevice.setOnCheckedChangeListener { _, isChecked ->
+                checkedMap[address] = isChecked
+            }
+
+            return view
+        }
+    }
 
     // ──────────────────────────────────────────────
     // 교실 필터
@@ -117,6 +156,9 @@ class MainActivity : AppCompatActivity() {
         agentMap.clear()
         addressOrder.clear()
         displayList.clear()
+        checkedMap.clear()
+        editRequestQueue.clear()
+        editRequestDialogActive = false
         deviceAdapter.notifyDataSetChanged()
         findViewById<TextView>(R.id.tvDeviceCount).text = "발견된 태블릿: 0대"
 
@@ -129,6 +171,47 @@ class MainActivity : AppCompatActivity() {
             discoveryListener = null
         }
         handler.postDelayed({ startDiscovery() }, 500)
+    }
+
+    // ──────────────────────────────────────────────
+    // 학적 수정 요청
+    // ──────────────────────────────────────────────
+
+    // 대기열에 추가하고, 팝업이 없으면 즉시 표시
+    private fun enqueueEditRequest(address: String) {
+        if (address !in editRequestQueue) {
+            editRequestQueue.addLast(address)
+        }
+        if (!editRequestDialogActive) {
+            showNextEditRequestDialog()
+        }
+    }
+
+    private fun showNextEditRequestDialog() {
+        val address = editRequestQueue.firstOrNull() ?: return
+        val deviceName = agentMap[address] ?: address
+        editRequestDialogActive = true
+        showEditRequestDialog(address, deviceName)
+    }
+
+    private fun showEditRequestDialog(address: String, deviceName: String) {
+        AlertDialog.Builder(this)
+            .setTitle("학적 수정 요청")
+            .setMessage("$deviceName 학적 수정 요청")
+            .setCancelable(false)
+            .setPositiveButton("허락") { _, _ ->
+                editRequestQueue.remove(address)
+                editRequestDialogActive = false
+                sendCommand(address, "EDIT_APPROVED")
+                showNextEditRequestDialog()
+            }
+            .setNegativeButton("거절") { _, _ ->
+                editRequestQueue.remove(address)
+                editRequestDialogActive = false
+                sendCommand(address, "EDIT_REJECTED")
+                showNextEditRequestDialog()
+            }
+            .show()
     }
 
     // ──────────────────────────────────────────────
@@ -160,7 +243,9 @@ class MainActivity : AppCompatActivity() {
         val sessionStr = if (parts.getOrNull(0) == "IN_SESSION") "수업중" else "대기중"
         val accessibilityStr = if (parts.find { it.startsWith("ACCESSIBILITY:") }?.endsWith("true") == true) "✅접근성" else "⚠️접근성"
         val overlayStr = if (parts.find { it.startsWith("OVERLAY:") }?.endsWith("true") == true) "✅오버레이" else "⚠️오버레이"
-        return "$deviceName | $sessionStr | $accessibilityStr | $overlayStr"
+        val editRequest = parts.find { it.startsWith("EDIT_REQUEST:") }?.endsWith("true") == true
+        val prefix = if (editRequest) "📝 " else ""
+        return "$prefix$deviceName | $sessionStr | $accessibilityStr | $overlayStr"
     }
 
     // ──────────────────────────────────────────────
@@ -179,14 +264,24 @@ class MainActivity : AppCompatActivity() {
                 override fun onMessage(message: String) {
                     android.util.Log.d("Controller", "상태 확인 $address: $message")
 
-                    // 상태 불일치 강제 보정
-                    val controllerInSession = getSharedPreferences("classroom", MODE_PRIVATE)
-                        .getBoolean("isInSession", false)
-                    val agentInSession = message.split("|").getOrNull(0) == "IN_SESSION"
-                    if (controllerInSession && !agentInSession) {
-                        sendCommand(address, "START")
-                    } else if (!controllerInSession && agentInSession) {
-                        sendCommand(address, "STOP")
+                    val parts = message.split("|")
+
+                    // STATUS 응답에 EDIT_REQUEST:true 포함된 경우 대기열에 추가
+                    val hasEditRequest = parts.find { it.startsWith("EDIT_REQUEST:") }?.endsWith("true") == true
+                    if (hasEditRequest) {
+                        runOnUiThread { enqueueEditRequest(address) }
+                    }
+
+                    // 체크된 기기만 상태 불일치 강제 보정
+                    if (checkedMap.getOrDefault(address, true)) {
+                        val controllerInSession = getSharedPreferences("classroom", MODE_PRIVATE)
+                            .getBoolean("isInSession", false)
+                        val agentInSession = parts.getOrNull(0) == "IN_SESSION"
+                        if (controllerInSession && !agentInSession) {
+                            sendCommand(address, "START")
+                        } else if (!controllerInSession && agentInSession) {
+                            sendCommand(address, "STOP")
+                        }
                     }
 
                     val formatted = parseStatusMessage(address, message)
@@ -232,17 +327,11 @@ class MainActivity : AppCompatActivity() {
 
         nsdManager = getSystemService(NSD_SERVICE) as NsdManager
 
-        deviceAdapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, displayList)
+        deviceAdapter = DeviceAdapter()
         findViewById<ListView>(R.id.lvDevices).adapter = deviceAdapter
 
-        findViewById<Button>(R.id.btnStart).setOnClickListener {
-            sendToAll("START")
-        }
-
-        findViewById<Button>(R.id.btnStop).setOnClickListener {
-            sendToAll("STOP")
-        }
-
+        findViewById<Button>(R.id.btnStart).setOnClickListener { sendToAll("START") }
+        findViewById<Button>(R.id.btnStop).setOnClickListener { sendToAll("STOP") }
         findViewById<Button>(R.id.btnSettings).setOnClickListener {
             showClassroomSetupDialog(cancelable = true)
         }
@@ -295,6 +384,7 @@ class MainActivity : AppCompatActivity() {
                         runOnUiThread {
                             if (!agentMap.containsKey(address)) {
                                 agentMap[address] = deviceName
+                                checkedMap[address] = true  // 신규 기기는 항상 체크됨
                                 addressOrder.add(address)
                                 displayList.add("$deviceName | 연결 확인중...")
                                 sortByPriority()
@@ -309,7 +399,21 @@ class MainActivity : AppCompatActivity() {
 
             override fun onServiceLost(serviceInfo: NsdServiceInfo) {
                 android.util.Log.d("mDNS", "기기 사라짐: ${serviceInfo.serviceName}")
-                // 사라진 기기 제거는 실제 기기 테스트 후 구현
+                val deviceName = serviceInfo.serviceName
+                val address = agentMap.entries.find { it.value == deviceName }?.key ?: return
+                runOnUiThread {
+                    val idx = addressOrder.indexOf(address)
+                    if (idx >= 0) {
+                        agentMap.remove(address)
+                        checkedMap.remove(address)        // 재연결 시 체크 초기화
+                        editRequestQueue.remove(address)
+                        addressOrder.removeAt(idx)
+                        displayList.removeAt(idx)
+                        deviceAdapter.notifyDataSetChanged()
+                        findViewById<TextView>(R.id.tvDeviceCount).text =
+                            "발견된 태블릿: ${agentMap.size}대"
+                    }
+                }
             }
         }
 
@@ -338,7 +442,8 @@ class MainActivity : AppCompatActivity() {
 
         updateSessionUI(isInSession)
 
-        addressOrder.forEach { address ->
+        // 체크된 기기에만 명령 전송
+        addressOrder.filter { checkedMap.getOrDefault(it, true) }.forEach { address ->
             sendCommand(address, command)
         }
     }
