@@ -17,7 +17,12 @@ import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import org.java_websocket.client.WebSocketClient
 import org.java_websocket.handshake.ServerHandshake
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.net.URI
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import org.json.JSONObject
@@ -93,6 +98,32 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var nsdManager: NsdManager
     private var discoveryListener: NsdManager.DiscoveryListener? = null
+
+    // ── 중복 컨트롤러 감지 (UDP) ──
+    private var myControllerId: String = ""
+    private val UDP_PORT = 9999
+    private val UDP_BROADCAST_INTERVAL_MS = 30_000L
+    private val UDP_STALE_TIMEOUT_MS      = 90_000L
+
+    @Volatile private var udpBroadcastRunning = false
+    @Volatile private var udpListenRunning    = false
+    private var udpBroadcastThread: Thread? = null
+    private var udpListenThread: Thread? = null
+    private val lastSeenControllers = mutableMapOf<String, Long>()
+
+    private var duplicateWarningShown      = false
+    private var duplicateAlertDialog: AlertDialog? = null
+    private var duplicateCountdownRunnable: Runnable? = null
+    private val duplicateEscalateRunnable  = Runnable {
+        if (duplicateWarningShown) showDuplicateCountdownDialog()
+    }
+    private val duplicateStalenessRunnable = object : Runnable {
+        override fun run() {
+            checkDuplicateStaleness()
+            handler.postDelayed(this, 30_000L)
+        }
+    }
+
     private lateinit var deviceAdapter: DeviceAdapter
 
     // ──────────────────────────────────────────────
@@ -475,6 +506,11 @@ class MainActivity : AppCompatActivity() {
 
         handler.postDelayed(pollRunnable, 5000)
 
+        initControllerId()
+        startUdpListener()
+        handler.postDelayed(duplicateStalenessRunnable, 30_000L)
+        if (isInSession) startUdpBroadcast()
+
         if (!prefs.getBoolean("wizard_done", false)) {
             wizardLauncher.launch(Intent(this, SetupWizardActivity::class.java))
         } else if (!prefs.getBoolean("filter_set", false)) {
@@ -585,6 +621,18 @@ class MainActivity : AppCompatActivity() {
         }
 
         val isInSession = command == "START"
+        if (isInSession) {
+            startUdpBroadcast()
+        } else {
+            stopUdpBroadcast()
+            handler.removeCallbacks(duplicateEscalateRunnable)
+            duplicateCountdownRunnable?.let { handler.removeCallbacks(it) }
+            duplicateCountdownRunnable = null
+            duplicateAlertDialog?.dismiss()
+            duplicateAlertDialog  = null
+            duplicateWarningShown = false
+            synchronized(lastSeenControllers) { lastSeenControllers.clear() }
+        }
         getSharedPreferences("classroom", MODE_PRIVATE).edit()
             .putBoolean("isInSession", isInSession)
             .apply()
@@ -670,6 +718,7 @@ class MainActivity : AppCompatActivity() {
         autoStopPhase  = false
         peakAgentCount = 0
         handler.removeCallbacks(countdownTickRunnable)
+        stopUdpBroadcast()
         findViewById<LinearLayout>(R.id.llAutoStop).visibility = View.GONE
 
         addressOrder.filter { checkedMap.getOrDefault(it, true) }.forEach { address ->
@@ -679,6 +728,183 @@ class MainActivity : AppCompatActivity() {
             .putBoolean("isInSession", false).apply()
         updateSessionUI(false)
         Toast.makeText(this, "수업이 자동 종료되었습니다", Toast.LENGTH_LONG).show()
+    }
+
+    // ──────────────────────────────────────────────
+    // 중복 컨트롤러 감지 (UDP)
+    // ──────────────────────────────────────────────
+
+    private fun initControllerId() {
+        val prefs = getSharedPreferences("classroom", MODE_PRIVATE)
+        var id = prefs.getString("controller_id", null)
+        if (id == null) {
+            id = UUID.randomUUID().toString().replace("-", "").substring(0, 8)
+            prefs.edit().putString("controller_id", id).apply()
+        }
+        myControllerId = id
+    }
+
+    private fun startUdpBroadcast() {
+        if (udpBroadcastRunning) return
+        udpBroadcastRunning = true
+        val prefix  = getFilterPrefix()
+        val message = "CLASSROOM_CONTROLLER|$prefix|$myControllerId"
+        udpBroadcastThread = Thread {
+            try {
+                val socket = DatagramSocket()
+                socket.broadcast = true
+                val data = message.toByteArray(Charsets.UTF_8)
+                val addr = InetAddress.getByName("255.255.255.255")
+                while (udpBroadcastRunning) {
+                    try {
+                        socket.send(DatagramPacket(data, data.size, addr, UDP_PORT))
+                    } catch (_: Exception) {}
+                    try {
+                        Thread.sleep(UDP_BROADCAST_INTERVAL_MS)
+                    } catch (_: InterruptedException) { break }
+                }
+                socket.close()
+            } catch (_: Exception) {}
+        }.also { it.isDaemon = true; it.start() }
+    }
+
+    private fun stopUdpBroadcast() {
+        udpBroadcastRunning = false
+        udpBroadcastThread?.interrupt()
+        udpBroadcastThread = null
+    }
+
+    private fun startUdpListener() {
+        if (udpListenRunning) return
+        udpListenRunning = true
+        udpListenThread = Thread {
+            try {
+                val socket = DatagramSocket(null)
+                socket.reuseAddress = true
+                socket.bind(InetSocketAddress(UDP_PORT))
+                socket.soTimeout = 1000
+                val buf = ByteArray(256)
+                while (udpListenRunning) {
+                    try {
+                        val packet = DatagramPacket(buf, buf.size)
+                        socket.receive(packet)
+                        val msg   = String(packet.data, 0, packet.length, Charsets.UTF_8)
+                        val parts = msg.split("|")
+                        if (parts.size == 3 && parts[0] == "CLASSROOM_CONTROLLER") {
+                            val msgPrefix = parts[1]
+                            val senderId  = parts[2]
+                            if (senderId == myControllerId) continue
+                            if (msgPrefix != getFilterPrefix()) continue
+                            synchronized(lastSeenControllers) {
+                                lastSeenControllers[senderId] = System.currentTimeMillis()
+                            }
+                            handler.post { onDuplicateDetectedFromUdp() }
+                        }
+                    } catch (_: java.net.SocketTimeoutException) {}
+                }
+                socket.close()
+            } catch (e: Exception) {
+                android.util.Log.e("UDP", "리스너 오류: ${e.message}")
+            }
+        }.also { it.isDaemon = true; it.start() }
+    }
+
+    private fun stopUdpListener() {
+        udpListenRunning = false
+        udpListenThread?.interrupt()
+        udpListenThread = null
+    }
+
+    private fun checkDuplicateStaleness() {
+        val now = System.currentTimeMillis()
+        val alive: Boolean
+        synchronized(lastSeenControllers) {
+            val iter = lastSeenControllers.iterator()
+            while (iter.hasNext()) {
+                if (now - iter.next().value > UDP_STALE_TIMEOUT_MS) iter.remove()
+            }
+            alive = lastSeenControllers.isNotEmpty()
+        }
+        if (!alive && duplicateWarningShown) {
+            onDuplicateControllerGone()
+        }
+    }
+
+    private fun onDuplicateDetectedFromUdp() {
+        val isInSession = getSharedPreferences("classroom", MODE_PRIVATE)
+            .getBoolean("isInSession", false)
+        if (!isInSession || duplicateWarningShown) return
+        duplicateWarningShown = true
+        showDuplicateWarningDialog()
+    }
+
+    private fun onDuplicateControllerGone() {
+        duplicateWarningShown = false
+        handler.removeCallbacks(duplicateEscalateRunnable)
+        duplicateCountdownRunnable?.let { handler.removeCallbacks(it) }
+        duplicateCountdownRunnable = null
+        duplicateAlertDialog?.dismiss()
+        duplicateAlertDialog = null
+        Toast.makeText(this, "중복 컨트롤러 감지 해제됨", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun showDuplicateWarningDialog() {
+        duplicateAlertDialog?.dismiss()
+        handler.removeCallbacks(duplicateEscalateRunnable)
+        handler.postDelayed(duplicateEscalateRunnable, 5L * 60 * 1000)
+        duplicateAlertDialog = AlertDialog.Builder(this)
+            .setTitle("⚠️ 중복 컨트롤러 감지")
+            .setMessage("같은 교실에서 다른 컨트롤러가 실행 중입니다.\n5분 후 수업이 자동 종료됩니다.")
+            .setCancelable(false)
+            .setNegativeButton("무시") { _, _ ->
+                handler.removeCallbacks(duplicateEscalateRunnable)
+                duplicateWarningShown = false
+                duplicateAlertDialog  = null
+            }
+            .show()
+    }
+
+    private fun showDuplicateCountdownDialog() {
+        duplicateAlertDialog?.dismiss()
+        val endMs = System.currentTimeMillis() + 60_000L
+        val tick  = object : Runnable {
+            override fun run() {
+                val secs = ((endMs - System.currentTimeMillis()) / 1000L).coerceAtLeast(0L).toInt()
+                if (secs <= 0) { executeDuplicateStop(); return }
+                duplicateAlertDialog?.setMessage(
+                    "다른 컨트롤러가 실행 중입니다.\n${secs}초 후 수업이 자동 종료됩니다.")
+                handler.postDelayed(this, 1000)
+            }
+        }
+        duplicateCountdownRunnable = tick
+        duplicateAlertDialog = AlertDialog.Builder(this)
+            .setTitle("⚠️ 중복 컨트롤러 - 종료 예정")
+            .setMessage("다른 컨트롤러가 실행 중입니다.\n60초 후 수업이 자동 종료됩니다.")
+            .setCancelable(false)
+            .setNegativeButton("무시") { _, _ ->
+                duplicateCountdownRunnable?.let { handler.removeCallbacks(it) }
+                duplicateCountdownRunnable = null
+                duplicateWarningShown      = false
+                duplicateAlertDialog       = null
+            }
+            .show()
+        handler.post(tick)
+    }
+
+    private fun executeDuplicateStop() {
+        duplicateCountdownRunnable?.let { handler.removeCallbacks(it) }
+        duplicateCountdownRunnable = null
+        duplicateAlertDialog?.dismiss()
+        duplicateAlertDialog  = null
+        duplicateWarningShown = false
+        stopUdpBroadcast()
+        addressOrder.filter { checkedMap.getOrDefault(it, true) }.forEach { address ->
+            sendCommand(address, "STOP")
+        }
+        getSharedPreferences("classroom", MODE_PRIVATE).edit()
+            .putBoolean("isInSession", false).apply()
+        updateSessionUI(false)
+        Toast.makeText(this, "중복 컨트롤러로 인해 수업이 종료되었습니다", Toast.LENGTH_LONG).show()
     }
 
     // ──────────────────────────────────────────────
@@ -824,6 +1050,12 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         handler.removeCallbacks(pollRunnable)
         handler.removeCallbacks(countdownTickRunnable)
+        handler.removeCallbacks(duplicateStalenessRunnable)
+        handler.removeCallbacks(duplicateEscalateRunnable)
+        duplicateCountdownRunnable?.let { handler.removeCallbacks(it) }
+        stopUdpBroadcast()
+        stopUdpListener()
+        duplicateAlertDialog?.dismiss()
         discoveryListener?.let { nsdManager.stopServiceDiscovery(it) }
         super.onDestroy()
     }
