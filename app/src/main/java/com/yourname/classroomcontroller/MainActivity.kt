@@ -15,8 +15,22 @@ import com.google.android.material.bottomsheet.BottomSheetDialog
 import org.java_websocket.client.WebSocketClient
 import org.java_websocket.handshake.ServerHandshake
 import java.net.URI
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 class MainActivity : AppCompatActivity() {
+
+    private val DEFAULT_PACKAGES = setOf(
+        "com.microsoft.office.onenote",
+        "com.android.systemui",
+        "com.google.android.inputmethod.latin",
+        "com.samsung.android.honeyboard",
+        "com.android.launcher",
+        "com.android.launcher2",
+        "com.android.launcher3",
+        "com.sec.android.app.launcher"
+    )
+    private var allowedApps = mutableSetOf<String>()
 
     // address (IP:port) -> deviceName
     private val agentMap     = mutableMapOf<String, String>()
@@ -362,6 +376,12 @@ class MainActivity : AppCompatActivity() {
         val isInSession = prefs.getBoolean("isInSession", false)
         updateSessionUI(isInSession)
 
+        // Restore allowed apps
+        val savedApps = prefs.getStringSet("allowed_apps", null)
+        if (savedApps != null) {
+            allowedApps = savedApps.toMutableSet()
+        }
+
         nsdManager    = getSystemService(NSD_SERVICE) as NsdManager
         deviceAdapter = DeviceAdapter()
         findViewById<ListView>(R.id.lvDevices).adapter = deviceAdapter
@@ -370,6 +390,9 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnStop).setOnClickListener  { sendToAll("STOP") }
         findViewById<ImageButton>(R.id.btnSettings).setOnClickListener {
             showClassroomSetupDialog(cancelable = true)
+        }
+        findViewById<ImageButton>(R.id.btnAppSettings).setOnClickListener {
+            getAppsAndShowDialog()
         }
 
         handler.postDelayed(pollRunnable, 5000)
@@ -424,6 +447,10 @@ class MainActivity : AppCompatActivity() {
                                 addressOrder.add(address)
                                 displayList.add("$deviceName | 연결 확인중...")
                                 sortByPriority()
+                                if (allowedApps.isNotEmpty()) {
+                                    val cmd = "SET_ALLOWED_APPS|" + allowedApps.joinToString("|")
+                                    sendCommand(address, cmd)
+                                }
                             }
                             updateAppBarSubtitle()
                             android.util.Log.d("Controller", "리스트 크기: ${agentMap.size}")
@@ -513,6 +540,134 @@ class MainActivity : AppCompatActivity() {
             }
         }
         client.connect()
+    }
+
+    // ──────────────────────────────────────────────
+    // 허용 앱 설정
+    // ──────────────────────────────────────────────
+
+    private fun getAppsAndShowDialog() {
+        if (agentMap.isEmpty()) {
+            Toast.makeText(this, "발견된 태블릿이 없습니다", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val loadingDialog = AlertDialog.Builder(this)
+            .setMessage("앱 목록 수집 중...")
+            .setCancelable(false)
+            .show()
+
+        val selectedAgents = addressOrder.shuffled().take(3)
+        val responses      = mutableMapOf<String, Map<String, String>>()
+        val pendingCount   = AtomicInteger(selectedAgents.size)
+        val done           = AtomicBoolean(false)
+
+        fun finalize() {
+            if (!done.compareAndSet(false, true)) return
+            val intersection: Map<String, String> = if (responses.isEmpty()) {
+                emptyMap()
+            } else {
+                val commonPkgs = responses.values
+                    .map { it.keys.toSet() }
+                    .reduce { acc, set -> acc intersect set }
+                commonPkgs.associateWith { pkg ->
+                    responses.values.firstNotNullOfOrNull { it[pkg] } ?: pkg
+                }
+            }
+            runOnUiThread {
+                loadingDialog.dismiss()
+                showAppSelectionDialog(intersection)
+            }
+        }
+
+        handler.postDelayed({ finalize() }, 5000)
+
+        selectedAgents.forEach { address ->
+            val uri    = URI("ws://$address")
+            val client = object : WebSocketClient(uri) {
+                override fun onOpen(handshake: ServerHandshake) { send("GET_APPS") }
+
+                override fun onMessage(message: String) {
+                    if (message.startsWith("APP_LIST")) {
+                        val appMap = message.split("|").drop(1).mapNotNull { entry ->
+                            val idx = entry.indexOf(':')
+                            if (idx > 0) entry.substring(idx + 1) to entry.substring(0, idx)
+                            else null
+                        }.toMap()
+                        synchronized(responses) { responses[address] = appMap }
+                    }
+                    if (pendingCount.decrementAndGet() == 0) finalize()
+                    close()
+                }
+
+                override fun onClose(code: Int, reason: String, remote: Boolean) {}
+
+                override fun onError(ex: Exception) {
+                    android.util.Log.e("Controller", "GET_APPS 실패 $address: ${ex.message}")
+                    if (pendingCount.decrementAndGet() == 0) finalize()
+                }
+            }
+            client.connect()
+        }
+    }
+
+    private fun showAppSelectionDialog(appMap: Map<String, String>) {
+        val dp4 = (4 * resources.displayMetrics.density).toInt()
+        val dp8 = (8 * resources.displayMetrics.density).toInt()
+
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp8, dp8, dp8, dp8)
+        }
+
+        val checkBoxes = mutableMapOf<String, CheckBox>()
+
+        // Default packages – always checked, cannot uncheck
+        DEFAULT_PACKAGES.forEach { pkg ->
+            val appName = appMap[pkg] ?: pkg
+            val cb = CheckBox(this).apply {
+                text      = "$appName (기본)"
+                isChecked = true
+                isEnabled = false
+                setPadding(dp4, dp4, dp4, dp4)
+            }
+            checkBoxes[pkg] = cb
+            container.addView(cb)
+        }
+
+        // Non-default packages from intersection, sorted by display name
+        appMap.entries
+            .filter { it.key !in DEFAULT_PACKAGES }
+            .sortedBy { it.value }
+            .forEach { (pkg, name) ->
+                val cb = CheckBox(this).apply {
+                    text      = name
+                    isChecked = pkg in allowedApps
+                    setPadding(dp4, dp4, dp4, dp4)
+                }
+                checkBoxes[pkg] = cb
+                container.addView(cb)
+            }
+
+        val scrollView = ScrollView(this).apply { addView(container) }
+
+        AlertDialog.Builder(this)
+            .setTitle("허용 앱 설정")
+            .setView(scrollView)
+            .setPositiveButton("확인") { _, _ ->
+                val selected = checkBoxes.entries
+                    .filter { it.value.isChecked }
+                    .map { it.key }
+                    .toMutableSet()
+                allowedApps = selected
+                getSharedPreferences("classroom", MODE_PRIVATE).edit()
+                    .putStringSet("allowed_apps", selected)
+                    .apply()
+                val command = "SET_ALLOWED_APPS|" + selected.joinToString("|")
+                addressOrder.forEach { address -> sendCommand(address, command) }
+            }
+            .setNegativeButton("취소", null)
+            .show()
     }
 
     override fun onDestroy() {
