@@ -57,7 +57,7 @@ class SetupWizardActivity : AppCompatActivity() {
         "ClassroomController 설정",
         "교실 설정",
         "태블릿 탐색",
-        "앱 분석",
+        "허용 앱 설정",
         "설정 완료"
     )
 

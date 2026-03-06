@@ -1,6 +1,7 @@
 package com.yourname.classroomcontroller
 
 import android.app.AlertDialog
+import android.content.Intent
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.net.nsd.NsdManager
@@ -11,6 +12,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import org.java_websocket.client.WebSocketClient
@@ -24,13 +26,15 @@ class MainActivity : AppCompatActivity() {
 
     private val DEFAULT_PACKAGES = setOf(
         "com.microsoft.office.onenote",
+        "com.yourname.classroomagent",
         "com.android.systemui",
         "com.google.android.inputmethod.latin",
         "com.samsung.android.honeyboard",
         "com.android.launcher",
         "com.android.launcher2",
         "com.android.launcher3",
-        "com.sec.android.app.launcher"
+        "com.sec.android.app.launcher",
+        "com.google.android.apps.nexuslauncher"
     )
     private var allowedApps  = mutableSetOf<String>()
     private val cachedAppMap = mutableMapOf<String, String>() // packageName -> appName
@@ -44,6 +48,22 @@ class MainActivity : AppCompatActivity() {
     // 학적 수정 요청 대기열 (순서대로 팝업 표시, 중복 주소 불허)
     private val editRequestQueue = ArrayDeque<String>()
     private var editRequestDialogActive = false
+
+    private val wizardLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { _ ->
+        val prefs = getSharedPreferences("classroom", MODE_PRIVATE)
+        val savedApps = prefs.getStringSet("allowed_apps", null)
+        if (savedApps != null) allowedApps = savedApps.toMutableSet()
+        val cachedJson = prefs.getString("cached_app_map", null)
+        if (cachedJson != null) {
+            try {
+                val json = JSONObject(cachedJson)
+                json.keys().forEach { key -> cachedAppMap[key] = json.getString(key) }
+            } catch (_: Exception) {}
+        }
+        restartDiscovery()
+    }
 
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
     private val pollRunnable = object : Runnable {
@@ -147,6 +167,18 @@ class MainActivity : AppCompatActivity() {
         val grade    = prefs.getInt("grade", 1)
         val classNum = prefs.getString("class_num", "01") ?: "01"
         return "$grade$classNum"
+    }
+
+    private fun showSettingsMenu() {
+        val options = arrayOf("🏫 학급 설정", "🧙 초기 설정 마법사 재실행")
+        AlertDialog.Builder(this)
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> showClassroomSetupDialog(cancelable = true)
+                    1 -> wizardLauncher.launch(Intent(this, SetupWizardActivity::class.java))
+                }
+            }
+            .show()
     }
 
     private fun showClassroomSetupDialog(cancelable: Boolean = true) {
@@ -435,7 +467,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnStart).setOnClickListener { sendToAll("START") }
         findViewById<Button>(R.id.btnStop).setOnClickListener  { sendToAll("STOP") }
         findViewById<ImageButton>(R.id.btnSettings).setOnClickListener {
-            showClassroomSetupDialog(cancelable = true)
+            showSettingsMenu()
         }
         findViewById<ImageButton>(R.id.btnAppSettings).setOnClickListener {
             getAppsAndShowDialog()
@@ -443,8 +475,9 @@ class MainActivity : AppCompatActivity() {
 
         handler.postDelayed(pollRunnable, 5000)
 
-        if (!prefs.getBoolean("filter_set", false)) {
-            // 최초 실행: 반드시 교실 설정 후 탐색 시작
+        if (!prefs.getBoolean("wizard_done", false)) {
+            wizardLauncher.launch(Intent(this, SetupWizardActivity::class.java))
+        } else if (!prefs.getBoolean("filter_set", false)) {
             showClassroomSetupDialog(cancelable = false)
         } else {
             updateAppBarSubtitle()
@@ -654,7 +687,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun getAppsAndShowDialog() {
         if (agentMap.isEmpty()) {
-            Toast.makeText(this, "발견된 태블릿이 없습니다", Toast.LENGTH_SHORT).show()
+            if (cachedAppMap.isNotEmpty()) {
+                Toast.makeText(this, "이전에 저장된 앱 목록을 사용합니다", Toast.LENGTH_SHORT).show()
+                showAppSelectionDialog(cachedAppMap)
+            } else {
+                Toast.makeText(this, "발견된 태블릿이 없고 저장된 앱 목록도 없습니다", Toast.LENGTH_SHORT).show()
+            }
             return
         }
 
@@ -680,9 +718,15 @@ class MainActivity : AppCompatActivity() {
                     responses.values.firstNotNullOfOrNull { it[pkg] } ?: pkg
                 }
             }
+            // Merge into cachedAppMap (never shrink) and persist
+            cachedAppMap.putAll(intersection)
+            val json = JSONObject()
+            cachedAppMap.forEach { (k, v) -> json.put(k, v) }
+            getSharedPreferences("classroom", MODE_PRIVATE).edit()
+                .putString("cached_app_map", json.toString()).apply()
             runOnUiThread {
                 loadingDialog.dismiss()
-                showAppSelectionDialog(intersection)
+                showAppSelectionDialog(cachedAppMap)
             }
         }
 
@@ -728,20 +772,20 @@ class MainActivity : AppCompatActivity() {
 
         val checkBoxes = mutableMapOf<String, CheckBox>()
 
-        // Default packages – always checked, cannot uncheck
+        // Default packages – pre-checked, all enabled (user can uncheck if needed)
         DEFAULT_PACKAGES.forEach { pkg ->
             val appName = appMap[pkg] ?: pkg
             val cb = CheckBox(this).apply {
                 text      = "$appName (기본)"
                 isChecked = true
-                isEnabled = false
+                isEnabled = true
                 setPadding(dp4, dp4, dp4, dp4)
             }
             checkBoxes[pkg] = cb
             container.addView(cb)
         }
 
-        // Non-default packages from intersection, sorted by display name
+        // Non-default packages – checked only if previously in allowed_apps
         appMap.entries
             .filter { it.key !in DEFAULT_PACKAGES }
             .sortedBy { it.value }
@@ -749,6 +793,7 @@ class MainActivity : AppCompatActivity() {
                 val cb = CheckBox(this).apply {
                     text      = name
                     isChecked = pkg in allowedApps
+                    isEnabled = true
                     setPadding(dp4, dp4, dp4, dp4)
                 }
                 checkBoxes[pkg] = cb

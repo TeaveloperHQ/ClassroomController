@@ -6,4 +6,8 @@
     </style>
 
     <style name="Theme.ClassroomController" parent="Base.Theme.ClassroomController" />
+
+    <style name="Theme.ClassroomController.Wizard" parent="Theme.ClassroomController">
+        <item name="android:windowSoftInputMode">adjustResize</item>
+    </style>
 </resources>
