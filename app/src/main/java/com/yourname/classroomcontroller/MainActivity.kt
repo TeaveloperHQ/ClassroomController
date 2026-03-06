@@ -17,6 +17,7 @@ import org.java_websocket.handshake.ServerHandshake
 import java.net.URI
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import org.json.JSONObject
 
 class MainActivity : AppCompatActivity() {
 
@@ -30,7 +31,8 @@ class MainActivity : AppCompatActivity() {
         "com.android.launcher3",
         "com.sec.android.app.launcher"
     )
-    private var allowedApps = mutableSetOf<String>()
+    private var allowedApps  = mutableSetOf<String>()
+    private val cachedAppMap = mutableMapOf<String, String>() // packageName -> appName
 
     // address (IP:port) -> deviceName
     private val agentMap     = mutableMapOf<String, String>()
@@ -59,6 +61,7 @@ class MainActivity : AppCompatActivity() {
     // ──────────────────────────────────────────────
 
     private fun statusColorFor(displayStr: String): Int = when {
+        "🚨 우회" in displayStr      -> Color.parseColor("#9c27b0")
         "❌ 통신 끊김" in displayStr -> Color.parseColor("#d32f2f")
         "⚠️" in displayStr          -> Color.parseColor("#e65100")
         "대기중" in displayStr       -> Color.parseColor("#9e9e9e")
@@ -255,11 +258,12 @@ class MainActivity : AppCompatActivity() {
     // ──────────────────────────────────────────────
 
     private fun sortPriority(displayStr: String): Int = when {
-        "❌ 통신 끊김" in displayStr -> 0
-        "⚠️접근성" in displayStr    -> 1
-        "⚠️오버레이" in displayStr  -> 2
-        "대기중" in displayStr      -> 3
-        else                        -> 4
+        "🚨 우회" in displayStr      -> 0
+        "❌ 통신 끊김" in displayStr -> 1
+        "⚠️접근성" in displayStr    -> 2
+        "⚠️오버레이" in displayStr  -> 3
+        "대기중" in displayStr      -> 4
+        else                        -> 5
     }
 
     private fun sortByPriority() {
@@ -267,8 +271,8 @@ class MainActivity : AppCompatActivity() {
             .sortedWith(
                 compareBy<Pair<String, String>> { (_, display) -> sortPriority(display) }
                     .thenBy { (_, display) ->
-                        // 그룹 4(정상 수업중) 내에서만 기기명 오름차순 (학번순)
-                        if (sortPriority(display) == 4) {
+                        // 그룹 5(정상 수업중) 내에서만 기기명 오름차순 (학번순)
+                        if (sortPriority(display) == 5) {
                             val sep = display.indexOf(" | ")
                             val name = if (sep >= 0) display.substring(0, sep) else display
                             name.removePrefix("📝 ")
@@ -285,16 +289,29 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun parseStatusMessage(address: String, message: String): String {
-        val deviceName       = agentMap[address] ?: address
-        val parts            = message.split("|")
+        val deviceName  = agentMap[address] ?: address
+        val parts       = message.split("|")
+        val editRequest = parts.find { it.startsWith("EDIT_REQUEST:") }
+                ?.endsWith("true") == true
+        val prefix      = if (editRequest) "📝 " else ""
+
+        // SUSPICIOUS 처리: "none"이 아니면 🚨 표시로 대체
+        val suspRaw = parts.find { it.startsWith("SUSPICIOUS:") }
+                ?.removePrefix("SUSPICIOUS:") ?: "none"
+        if (suspRaw != "none") {
+            val tokens  = suspRaw.split(":")
+            val pkg     = tokens.getOrNull(0) ?: suspRaw
+            val time    = if (tokens.size >= 3) "${tokens[1]}:${tokens[2]}" else ""
+            val appName = cachedAppMap[pkg] ?: pkg
+            val timeStr = if (time.isNotEmpty()) " ($time)" else ""
+            return "$prefix$deviceName | 🚨 우회 시도 감지: $appName$timeStr"
+        }
+
         val sessionStr       = if (parts.getOrNull(0) == "IN_SESSION") "수업중" else "대기중"
         val accessibilityStr = if (parts.find { it.startsWith("ACCESSIBILITY:") }
                 ?.endsWith("true") == true) "✅접근성" else "⚠️접근성"
         val overlayStr       = if (parts.find { it.startsWith("OVERLAY:") }
                 ?.endsWith("true") == true) "✅오버레이" else "⚠️오버레이"
-        val editRequest      = parts.find { it.startsWith("EDIT_REQUEST:") }
-                ?.endsWith("true") == true
-        val prefix           = if (editRequest) "📝 " else ""
         return "$prefix$deviceName | $sessionStr | $accessibilityStr | $overlayStr"
     }
 
@@ -380,6 +397,15 @@ class MainActivity : AppCompatActivity() {
         val savedApps = prefs.getStringSet("allowed_apps", null)
         if (savedApps != null) {
             allowedApps = savedApps.toMutableSet()
+        }
+
+        // Restore cached app name map (packageName -> appName)
+        val cachedJson = prefs.getString("cached_app_map", null)
+        if (cachedJson != null) {
+            try {
+                val json = JSONObject(cachedJson)
+                json.keys().forEach { key -> cachedAppMap[key] = json.getString(key) }
+            } catch (_: Exception) {}
         }
 
         nsdManager    = getSystemService(NSD_SERVICE) as NsdManager
