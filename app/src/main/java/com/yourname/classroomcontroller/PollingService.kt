@@ -29,6 +29,7 @@ class PollingService : Service() {
         const val NOTIF_ID_MONITORING     = 1001
         const val NOTIF_ID_AUTOSTOP_START = 1002
         const val NOTIF_ID_AUTOSTOP_DONE  = 1003
+        const val NOTIF_ID_DUPLICATE      = 1004
         private const val NOTIF_ID_SUSPICIOUS_BASE = 2000
 
         fun createChannels(context: Context) {
