@@ -67,6 +67,40 @@
             android:textColor="#CCffffff"
             android:textSize="13sp"/>
 
+        <!-- 자동 종료 대기 바 -->
+        <LinearLayout
+            android:id="@+id/llAutoStop"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:paddingBottom="8dp"
+            android:gravity="center_vertical"
+            android:visibility="gone">
+
+            <ProgressBar
+                android:id="@+id/pbAutoStop"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="0dp"
+                android:layout_height="8dp"
+                android:layout_weight="1"
+                android:layout_marginEnd="10dp"
+                android:max="300"
+                android:progress="0"
+                android:progressTint="#FF9800"
+                android:progressBackgroundTint="#80FFFFFF"/>
+
+            <TextView
+                android:id="@+id/tvAutoStop"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="#FFffffff"
+                android:textSize="11sp"
+                android:text="자동 종료 대기중"/>
+
+        </LinearLayout>
+
         <!-- Control buttons -->
         <LinearLayout
             android:layout_width="match_parent"

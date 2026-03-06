@@ -6,6 +6,7 @@ import android.graphics.drawable.GradientDrawable
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -49,6 +50,24 @@ class MainActivity : AppCompatActivity() {
         override fun run() {
             pollAllAgents()
             handler.postDelayed(this, 5000)
+        }
+    }
+
+    // ── 자동 종료 ──
+    private val COUNTDOWN_DURATION_MS = 5L * 60 * 1000   // 5분
+    private var peakAgentCount  = 0
+    private var autoStopPhase   = false
+    private var countdownStartMs = 0L
+    private val countdownTickRunnable = object : Runnable {
+        override fun run() {
+            val elapsed   = SystemClock.elapsedRealtime() - countdownStartMs
+            val remaining = COUNTDOWN_DURATION_MS - elapsed
+            if (remaining <= 0) { executeAutoStop(); return }
+            val secondsElapsed = (elapsed / 1000L).toInt().coerceAtMost(300)
+            findViewById<ProgressBar>(R.id.pbAutoStop).progress = secondsElapsed
+            findViewById<TextView>(R.id.tvAutoStop).text =
+                "자동 종료 대기중 · 현재 ${agentMap.size}대"
+            handler.postDelayed(this, 1000)
         }
     }
 
@@ -320,6 +339,7 @@ class MainActivity : AppCompatActivity() {
     // ──────────────────────────────────────────────
 
     private fun pollAllAgents() {
+        checkPeakAndAutoStop()
         val addresses = addressOrder.toList()
         addresses.forEach { address ->
             val uri    = URI("ws://$address")
@@ -477,6 +497,7 @@ class MainActivity : AppCompatActivity() {
                                     val cmd = "SET_ALLOWED_APPS|" + allowedApps.joinToString("|")
                                     sendCommand(address, cmd)
                                 }
+                                checkPeakAndAutoStop()
                             }
                             updateAppBarSubtitle()
                             android.util.Log.d("Controller", "리스트 크기: ${agentMap.size}")
@@ -499,6 +520,7 @@ class MainActivity : AppCompatActivity() {
                         displayList.removeAt(idx)
                         deviceAdapter.notifyDataSetChanged()
                         updateAppBarSubtitle()
+                        checkPeakAndAutoStop()
                     }
                 }
             }
@@ -517,6 +539,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun sendToAll(command: String) {
         android.util.Log.d("Controller", "발견된 기기 수: ${agentMap.size}, 목록: ${agentMap.keys}")
+
+        // 자동 종료 상태 초기화 (START/STOP 모두)
+        handler.removeCallbacks(countdownTickRunnable)
+        autoStopPhase  = false
+        peakAgentCount = 0
+        findViewById<LinearLayout>(R.id.llAutoStop).visibility = View.GONE
+
         if (agentMap.isEmpty()) {
             Toast.makeText(this, "발견된 태블릿이 없습니다", Toast.LENGTH_SHORT).show()
             return
@@ -566,6 +595,57 @@ class MainActivity : AppCompatActivity() {
             }
         }
         client.connect()
+    }
+
+    // ──────────────────────────────────────────────
+    // 자동 종료
+    // ──────────────────────────────────────────────
+
+    private fun checkPeakAndAutoStop() {
+        val isInSession = getSharedPreferences("classroom", MODE_PRIVATE)
+            .getBoolean("isInSession", false)
+        if (!isInSession) return
+
+        val current = agentMap.size
+        if (current >= peakAgentCount) {
+            if (current > peakAgentCount) peakAgentCount = current
+            if (autoStopPhase) cancelAutoStopCountdown()
+        } else if (!autoStopPhase) {
+            if (peakAgentCount > 0 && current <= peakAgentCount / 3) {
+                startAutoStopCountdown()
+            }
+        }
+    }
+
+    private fun startAutoStopCountdown() {
+        autoStopPhase    = true
+        countdownStartMs = SystemClock.elapsedRealtime()
+        findViewById<LinearLayout>(R.id.llAutoStop).visibility = View.VISIBLE
+        findViewById<ProgressBar>(R.id.pbAutoStop).progress   = 0
+        findViewById<TextView>(R.id.tvAutoStop).text =
+            "자동 종료 대기중 · 현재 ${agentMap.size}대"
+        handler.post(countdownTickRunnable)
+    }
+
+    private fun cancelAutoStopCountdown() {
+        autoStopPhase = false
+        handler.removeCallbacks(countdownTickRunnable)
+        findViewById<LinearLayout>(R.id.llAutoStop).visibility = View.GONE
+    }
+
+    private fun executeAutoStop() {
+        autoStopPhase  = false
+        peakAgentCount = 0
+        handler.removeCallbacks(countdownTickRunnable)
+        findViewById<LinearLayout>(R.id.llAutoStop).visibility = View.GONE
+
+        addressOrder.filter { checkedMap.getOrDefault(it, true) }.forEach { address ->
+            sendCommand(address, "STOP")
+        }
+        getSharedPreferences("classroom", MODE_PRIVATE).edit()
+            .putBoolean("isInSession", false).apply()
+        updateSessionUI(false)
+        Toast.makeText(this, "수업이 자동 종료되었습니다", Toast.LENGTH_LONG).show()
     }
 
     // ──────────────────────────────────────────────
@@ -698,6 +778,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         handler.removeCallbacks(pollRunnable)
+        handler.removeCallbacks(countdownTickRunnable)
         discoveryListener?.let { nsdManager.stopServiceDiscovery(it) }
         super.onDestroy()
     }
