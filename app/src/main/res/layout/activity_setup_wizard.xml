@@ -1,0 +1,308 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/wizardRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#f5f5f5">
+
+    <!-- ── Header bar ── -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="#1976d2"
+        android:elevation="4dp"
+        android:paddingTop="16dp"
+        android:paddingBottom="12dp"
+        android:paddingEnd="16dp">
+
+        <ImageButton
+            android:id="@+id/btnWizardBack"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_arrow_back"
+            android:contentDescription="뒤로"
+            android:visibility="invisible"/>
+
+        <TextView
+            android:id="@+id/tvWizardTitle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text=""
+            android:textColor="#FFFFFF"
+            android:textSize="18sp"
+            android:textStyle="bold"/>
+
+        <TextView
+            android:id="@+id/tvStepIndicator"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="1/5"
+            android:textColor="#CCffffff"
+            android:textSize="14sp"/>
+
+    </LinearLayout>
+
+    <!-- ── ViewFlipper: 5 steps ── -->
+    <ViewFlipper
+        android:id="@+id/viewFlipper"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <!-- ─── Step 1: Welcome ─── -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:padding="32dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="수업 관리 앱 초기 설정을 시작합니다.\n태블릿이 모두 켜져 있는지 확인해주세요."
+                android:textSize="15sp"
+                android:textColor="#616161"
+                android:gravity="center"
+                android:lineSpacingMultiplier="1.5"
+                android:layout_marginBottom="48dp"/>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnStep1Start"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="시작하기"
+                android:textColor="#FFFFFF"
+                app:backgroundTint="#1976d2"
+                app:cornerRadius="8dp"
+                app:strokeWidth="0dp"/>
+
+        </LinearLayout>
+
+        <!-- ─── Step 2: Classroom setup ─── -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:padding="24dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="학년"
+                android:textSize="14sp"
+                android:textColor="#616161"
+                android:layout_marginTop="16dp"
+                android:layout_marginBottom="4dp"/>
+
+            <Spinner
+                android:id="@+id/spinnerWizardGrade"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"/>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="반"
+                android:textSize="14sp"
+                android:textColor="#616161"
+                android:layout_marginTop="16dp"
+                android:layout_marginBottom="4dp"/>
+
+            <Spinner
+                android:id="@+id/spinnerWizardClass"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"/>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"/>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnStep2Next"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="다음"
+                android:textColor="#FFFFFF"
+                app:backgroundTint="#1976d2"
+                app:cornerRadius="8dp"
+                app:strokeWidth="0dp"/>
+
+        </LinearLayout>
+
+        <!-- ─── Step 3: Tablet discovery ─── -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:padding="24dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="태블릿을 탐색하고 있습니다..."
+                android:textSize="15sp"
+                android:textColor="#616161"
+                android:layout_marginTop="8dp"
+                android:layout_marginBottom="32dp"/>
+
+            <TextView
+                android:id="@+id/tvDiscoveryCount"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="0대 발견됨"
+                android:textSize="32sp"
+                android:textStyle="bold"
+                android:textColor="#1976d2"
+                android:gravity="center"
+                android:layout_marginBottom="24dp"/>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnStep3Retry"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="다시 탐색"
+                android:textColor="#1976d2"
+                app:backgroundTint="#E3F2FD"
+                app:cornerRadius="8dp"
+                app:strokeWidth="0dp"/>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"/>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnStep3Next"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="다음"
+                android:textColor="#FFFFFF"
+                app:backgroundTint="#1976d2"
+                app:cornerRadius="8dp"
+                app:strokeWidth="0dp"/>
+
+        </LinearLayout>
+
+        <!-- ─── Step 4: App analysis ─── -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:padding="24dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="허용 앱 설정"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:textColor="#212121"
+                android:layout_marginTop="8dp"
+                android:layout_marginBottom="12dp"/>
+
+            <TextView
+                android:id="@+id/tvStep4LoadingDesc"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="태블릿에 설치된 앱을 수집하고 있습니다...\n(여러 태블릿의 공통 앱만 표시됩니다)"
+                android:textSize="14sp"
+                android:textColor="#616161"
+                android:lineSpacingMultiplier="1.4"
+                android:layout_marginBottom="16dp"/>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnStep4Analyze"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="앱 분석 시작"
+                android:textColor="#FFFFFF"
+                app:backgroundTint="#1976d2"
+                app:cornerRadius="8dp"
+                app:strokeWidth="0dp"/>
+
+            <ScrollView
+                android:id="@+id/scrollStep4"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:layout_marginTop="8dp"
+                android:visibility="gone">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="태블릿에 설치된 앱 목록을 분석했습니다.\n\n수업 중 학생들이 사용할 수 있는 앱을 선택해주세요.\n체크된 앱만 수업 중 사용 가능하며,\n체크 해제된 앱은 실행 즉시 차단됩니다.\n\n※ (기본) 표시 앱은 시스템 동작에 필요한 앱입니다.\n   필요한 경우 해제할 수 있지만 권장하지 않습니다.\n※ 허용 앱 설정은 언제든 바꿀 수 있습니다."
+                        android:textSize="13sp"
+                        android:textColor="#616161"
+                        android:lineSpacingMultiplier="1.5"
+                        android:paddingBottom="12dp"/>
+
+                    <LinearLayout
+                        android:id="@+id/containerApps"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"/>
+
+                </LinearLayout>
+
+            </ScrollView>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnStep4Next"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="다음"
+                android:textColor="#FFFFFF"
+                android:visibility="gone"
+                app:backgroundTint="#1976d2"
+                app:cornerRadius="8dp"
+                app:strokeWidth="0dp"/>
+
+        </LinearLayout>
+
+        <!-- ─── Step 5: Complete ─── -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:padding="32dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="설정이 완료되었습니다.\n선택한 허용 앱을 태블릿에 전송합니다."
+                android:textSize="15sp"
+                android:textColor="#616161"
+                android:gravity="center"
+                android:lineSpacingMultiplier="1.5"
+                android:layout_marginBottom="48dp"/>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnStep5Finish"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="시작하기"
+                android:textColor="#FFFFFF"
+                app:backgroundTint="#1976d2"
+                app:cornerRadius="8dp"
+                app:strokeWidth="0dp"/>
+
+        </LinearLayout>
+
+    </ViewFlipper>
+
+</LinearLayout>
