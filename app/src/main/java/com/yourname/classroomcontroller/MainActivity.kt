@@ -1,19 +1,27 @@
 package com.yourname.classroomcontroller
 
+import android.Manifest
 import android.app.AlertDialog
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
+import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.NotificationCompat
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import org.java_websocket.client.WebSocketClient
 import org.java_websocket.handshake.ServerHandshake
@@ -48,6 +56,11 @@ class MainActivity : AppCompatActivity() {
     // 학적 수정 요청 대기열 (순서대로 팝업 표시, 중복 주소 불허)
     private val editRequestQueue = ArrayDeque<String>()
     private var editRequestDialogActive = false
+
+    private lateinit var notificationManager: NotificationManager
+    private val notifiedSuspicious = mutableSetOf<String>()
+    private val isInSession: Boolean
+        get() = getSharedPreferences("classroom", MODE_PRIVATE).getBoolean("isInSession", false)
 
     private val wizardLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -355,8 +368,14 @@ class MainActivity : AppCompatActivity() {
             val time    = if (tokens.size >= 3) "${tokens[1]}:${tokens[2]}" else ""
             val appName = cachedAppMap[pkg] ?: pkg
             val timeStr = if (time.isNotEmpty()) " ($time)" else ""
+            if (deviceName !in notifiedSuspicious) {
+                sendAlertNotification(2001, "⚠️ 우회 시도 감지",
+                    "${deviceName} 학생이 차단된 앱 사용을 시도했습니다 (${time})")
+                notifiedSuspicious.add(deviceName)
+            }
             return "$prefix$deviceName | 🚨 우회 시도 감지: $appName$timeStr"
         }
+        notifiedSuspicious.remove(deviceName)
 
         val sessionStr       = if (parts.getOrNull(0) == "IN_SESSION") "수업중" else "대기중"
         val accessibilityStr = if (parts.find { it.startsWith("ACCESSIBILITY:") }
@@ -431,6 +450,7 @@ class MainActivity : AppCompatActivity() {
             }
             client.connect()
         }
+        if (isInSession) notificationManager.notify(1001, buildSessionNotification(agentMap.size))
     }
 
     // ──────────────────────────────────────────────
@@ -440,6 +460,27 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+        notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channelController = NotificationChannel("classroom_controller", "교실 관리", NotificationManager.IMPORTANCE_LOW)
+            channelController.lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            notificationManager.createNotificationChannel(channelController)
+
+            val channelAlerts = NotificationChannel("classroom_alerts", "교실 알림", NotificationManager.IMPORTANCE_HIGH)
+            channelAlerts.lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            notificationManager.createNotificationChannel(channelAlerts)
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                    != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(
+                    arrayOf(Manifest.permission.POST_NOTIFICATIONS), 100)
+            }
+        }
 
         val prefs       = getSharedPreferences("classroom", MODE_PRIVATE)
         val isInSession = prefs.getBoolean("isInSession", false)
@@ -579,7 +620,7 @@ class MainActivity : AppCompatActivity() {
         peakAgentCount = 0
         findViewById<LinearLayout>(R.id.llAutoStop).visibility = View.GONE
 
-        if (agentMap.isEmpty()) {
+        if (agentMap.isEmpty() && command == "START") {
             Toast.makeText(this, "발견된 태블릿이 없습니다", Toast.LENGTH_SHORT).show()
             return
         }
@@ -590,6 +631,12 @@ class MainActivity : AppCompatActivity() {
             .apply()
 
         updateSessionUI(isInSession)
+
+        if (isInSession) {
+            notificationManager.notify(1001, buildSessionNotification(agentMap.size))
+        } else {
+            notificationManager.cancel(1001)
+        }
 
         // 체크된 기기에만 명령 전송
         addressOrder.filter { checkedMap.getOrDefault(it, true) }.forEach { address ->
@@ -658,6 +705,8 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.tvAutoStop).text =
             "자동 종료 대기중 · 현재 ${agentMap.size}대"
         handler.post(countdownTickRunnable)
+        sendAlertNotification(2002, "⏳ 자동 수업 종료 예정",
+            "태블릿 1/3 이상 오프라인. 5분 후 수업이 자동 종료됩니다")
     }
 
     private fun cancelAutoStopCountdown() {
@@ -679,6 +728,8 @@ class MainActivity : AppCompatActivity() {
             .putBoolean("isInSession", false).apply()
         updateSessionUI(false)
         Toast.makeText(this, "수업이 자동 종료되었습니다", Toast.LENGTH_LONG).show()
+        sendAlertNotification(2002, "🔓 수업 종료",
+            "수업이 자동 종료되었습니다")
     }
 
     // ──────────────────────────────────────────────
@@ -819,6 +870,40 @@ class MainActivity : AppCompatActivity() {
             }
             .setNegativeButton("취소", null)
             .show()
+    }
+
+    // ──────────────────────────────────────────────
+    // 알림 헬퍼
+    // ──────────────────────────────────────────────
+
+    private fun buildSessionNotification(count: Int): Notification =
+        NotificationCompat.Builder(this, "classroom_controller")
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle("수업 관리 중")
+            .setContentText("${count}대 태블릿 모니터링 중")
+            .setOngoing(true)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .build()
+
+    private fun sendAlertNotification(id: Int, title: String, text: String) {
+        val notification = NotificationCompat.Builder(this, "classroom_alerts")
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setAutoCancel(true)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .build()
+        notificationManager.notify(id, notification)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
 
     override fun onDestroy() {
