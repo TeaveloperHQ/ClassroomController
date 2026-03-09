@@ -8,7 +8,9 @@ import android.app.NotificationManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.graphics.PorterDuff
 import android.graphics.drawable.GradientDrawable
+import androidx.core.content.ContextCompat
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.os.Build
@@ -51,6 +53,8 @@ class MainActivity : AppCompatActivity() {
     private val agentMap     = mutableMapOf<String, String>()
     private val addressOrder = mutableListOf<String>()
     private val displayList  = mutableListOf<String>()
+    // address -> VPN enabled (null = field absent / unknown)
+    private val vpnMap       = mutableMapOf<String, Boolean?>()
     // address -> checked (true = 포함, false = 제외)
     private val checkedMap   = mutableMapOf<String, Boolean>()
     // 학적 수정 요청 대기열 (순서대로 팝업 표시, 중복 주소 불허)
@@ -112,10 +116,11 @@ class MainActivity : AppCompatActivity() {
     // 상태 색상
     // ──────────────────────────────────────────────
 
-    private fun statusColorFor(displayStr: String): Int = when {
+    private fun statusColorFor(address: String, displayStr: String): Int = when {
         "🚨 우회" in displayStr      -> Color.parseColor("#9c27b0")
         "❌ 통신 끊김" in displayStr -> Color.parseColor("#d32f2f")
         "⚠️" in displayStr          -> Color.parseColor("#e65100")
+        vpnMap[address] == false     -> Color.parseColor("#ff6f00")
         "대기중" in displayStr       -> Color.parseColor("#9e9e9e")
         "연결 확인중" in displayStr  -> Color.parseColor("#9e9e9e")
         else                         -> Color.parseColor("#2e7d32")
@@ -138,6 +143,7 @@ class MainActivity : AppCompatActivity() {
             val cbDevice       = view.findViewById<CheckBox>(R.id.cbDevice)
             val tvDeviceName   = view.findViewById<TextView>(R.id.tvDeviceName)
             val tvDeviceStatus = view.findViewById<TextView>(R.id.tvDeviceStatus)
+            val tvVpn          = view.findViewById<TextView>(R.id.tvVpn)
             val viewBorder     = view.findViewById<View>(R.id.viewStatusBorder)
             val viewDot        = view.findViewById<View>(R.id.viewStatusDot)
 
@@ -152,7 +158,22 @@ class MainActivity : AppCompatActivity() {
             tvDeviceName.text   = namePart
             tvDeviceStatus.text = statusPart
 
-            val color = statusColorFor(full)
+            // VPN 상태 표시 (접근성·오버레이와 동일 스타일)
+            when (vpnMap[address]) {
+                true  -> {
+                    tvVpn.visibility = View.VISIBLE
+                    tvVpn.text = " | ✅VPN"
+                    tvVpn.setTextColor(Color.parseColor("#2e7d32"))
+                }
+                false -> {
+                    tvVpn.visibility = View.VISIBLE
+                    tvVpn.text = " | ⚠️VPN"
+                    tvVpn.setTextColor(Color.parseColor("#ff6f00"))
+                }
+                null  -> tvVpn.visibility = View.GONE
+            }
+
+            val color = statusColorFor(address, full)
             viewBorder.setBackgroundColor(color)
             tvDeviceStatus.setTextColor(color)
             viewDot.background = GradientDrawable().apply {
@@ -250,6 +271,7 @@ class MainActivity : AppCompatActivity() {
         agentMap.clear()
         addressOrder.clear()
         displayList.clear()
+        vpnMap.clear()
         checkedMap.clear()
         editRequestQueue.clear()
         editRequestDialogActive = false
@@ -321,22 +343,23 @@ class MainActivity : AppCompatActivity() {
     // 정렬 / 상태 파싱
     // ──────────────────────────────────────────────
 
-    private fun sortPriority(displayStr: String): Int = when {
+    private fun sortPriority(address: String, displayStr: String): Int = when {
         "🚨 우회" in displayStr      -> 0
         "❌ 통신 끊김" in displayStr -> 1
         "⚠️접근성" in displayStr    -> 2
         "⚠️오버레이" in displayStr  -> 3
-        "대기중" in displayStr      -> 4
-        else                        -> 5
+        vpnMap[address] == false     -> 4
+        "대기중" in displayStr      -> 5
+        else                        -> 6
     }
 
     private fun sortByPriority() {
         val paired = addressOrder.zip(displayList)
             .sortedWith(
-                compareBy<Pair<String, String>> { (_, display) -> sortPriority(display) }
-                    .thenBy { (_, display) ->
-                        // 그룹 5(정상 수업중) 내에서만 기기명 오름차순 (학번순)
-                        if (sortPriority(display) == 5) {
+                compareBy<Pair<String, String>> { (addr, display) -> sortPriority(addr, display) }
+                    .thenBy { (addr, display) ->
+                        // 그룹 6(정상 수업중) 내에서만 기기명 오름차순 (학번순)
+                        if (sortPriority(addr, display) == 6) {
                             val sep = display.indexOf(" | ")
                             val name = if (sep >= 0) display.substring(0, sep) else display
                             name.removePrefix("📝 ")
@@ -352,7 +375,7 @@ class MainActivity : AppCompatActivity() {
         deviceAdapter.notifyDataSetChanged()
     }
 
-    private fun parseStatusMessage(address: String, message: String): String {
+    private fun parseStatusMessage(address: String, message: String): Pair<String, Boolean?> {
         val deviceName  = agentMap[address] ?: address
         val parts       = message.split("|")
         val editRequest = parts.find { it.startsWith("EDIT_REQUEST:") }
@@ -373,7 +396,7 @@ class MainActivity : AppCompatActivity() {
                     "${deviceName} 학생이 차단된 앱 사용을 시도했습니다 (${time})")
                 notifiedSuspicious.add(deviceName)
             }
-            return "$prefix$deviceName | 🚨 우회 시도 감지: $appName$timeStr"
+            return Pair("$prefix$deviceName | 🚨 우회 시도 감지: $appName$timeStr", null)
         }
         notifiedSuspicious.remove(deviceName)
 
@@ -382,7 +405,9 @@ class MainActivity : AppCompatActivity() {
                 ?.endsWith("true") == true) "✅접근성" else "⚠️접근성"
         val overlayStr       = if (parts.find { it.startsWith("OVERLAY:") }
                 ?.endsWith("true") == true) "✅오버레이" else "⚠️오버레이"
-        return "$prefix$deviceName | $sessionStr | $accessibilityStr | $overlayStr"
+        val vpnPart = parts.find { it.startsWith("VPN:") }
+        val vpnOn: Boolean? = vpnPart?.endsWith("true")
+        return Pair("$prefix$deviceName | $sessionStr | $accessibilityStr | $overlayStr", vpnOn)
     }
 
     // ──────────────────────────────────────────────
@@ -423,11 +448,12 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
 
-                    val formatted = parseStatusMessage(address, message)
+                    val (formatted, vpnOn) = parseStatusMessage(address, message)
                     this@MainActivity.runOnUiThread {
                         val idx = addressOrder.indexOf(address)
                         if (idx >= 0) {
                             displayList[idx] = formatted
+                            vpnMap[address]  = vpnOn
                             sortByPriority()
                         }
                     }
@@ -505,7 +531,24 @@ class MainActivity : AppCompatActivity() {
         deviceAdapter = DeviceAdapter()
         findViewById<ListView>(R.id.lvDevices).adapter = deviceAdapter
 
-        findViewById<Button>(R.id.btnStart).setOnClickListener { sendToAll("START") }
+        findViewById<Button>(R.id.btnStart).setOnClickListener {
+            sendToAll("START")
+            val prefs = getSharedPreferences("classroom", MODE_PRIVATE)
+            val mode  = prefs.getString("site_control_mode", "allow_all")
+            val sites = prefs.getStringSet("allowed_sites", emptySet())!!
+            val siteCommand = if (mode == "allow_all") {
+                "SET_ALLOWED_SITES|*"
+            } else {
+                if (sites.isNotEmpty())
+                    "SET_ALLOWED_SITES|" + sites.joinToString("|")
+                else
+                    "SET_ALLOWED_SITES"
+            }
+            handler.postDelayed({
+                sendToAll(siteCommand)
+                android.util.Log.d("SiteSettings", "사이트 설정 전송: $siteCommand")
+            }, 1000)
+        }
         findViewById<Button>(R.id.btnStop).setOnClickListener  { sendToAll("STOP") }
         findViewById<ImageButton>(R.id.btnSettings).setOnClickListener {
             showSettingsMenu()
@@ -513,6 +556,10 @@ class MainActivity : AppCompatActivity() {
         findViewById<ImageButton>(R.id.btnAppSettings).setOnClickListener {
             getAppsAndShowDialog()
         }
+        findViewById<ImageButton>(R.id.btnSiteSettings).setOnClickListener {
+            showSiteSettingsDialog()
+        }
+        updateSiteIcon()
 
         handler.postDelayed(pollRunnable, 5000)
 
@@ -588,6 +635,7 @@ class MainActivity : AppCompatActivity() {
                     val idx = addressOrder.indexOf(address)
                     if (idx >= 0) {
                         agentMap.remove(address)
+                        vpnMap.remove(address)
                         checkedMap.remove(address)       // 재연결 시 체크 초기화
                         editRequestQueue.remove(address)
                         addressOrder.removeAt(idx)
@@ -613,35 +661,37 @@ class MainActivity : AppCompatActivity() {
 
     private fun sendToAll(command: String) {
         android.util.Log.d("Controller", "발견된 기기 수: ${agentMap.size}, 목록: ${agentMap.keys}")
+        android.util.Log.d("SiteSettings", "sendToAll 호출: $command")
 
-        // 자동 종료 상태 초기화 (START/STOP 모두)
-        handler.removeCallbacks(countdownTickRunnable)
-        autoStopPhase  = false
-        peakAgentCount = 0
-        findViewById<LinearLayout>(R.id.llAutoStop).visibility = View.GONE
+        // START/STOP 전용 세션 상태 관리
+        if (command == "START" || command == "STOP") {
+            handler.removeCallbacks(countdownTickRunnable)
+            autoStopPhase  = false
+            peakAgentCount = 0
+            findViewById<LinearLayout>(R.id.llAutoStop).visibility = View.GONE
 
-        if (agentMap.isEmpty() && command == "START") {
-            Toast.makeText(this, "발견된 태블릿이 없습니다", Toast.LENGTH_SHORT).show()
-            return
-        }
+            if (agentMap.isEmpty() && command == "START") {
+                Toast.makeText(this, "발견된 태블릿이 없습니다", Toast.LENGTH_SHORT).show()
+                return
+            }
 
-        val isInSession = command == "START"
-        getSharedPreferences("classroom", MODE_PRIVATE).edit()
-            .putBoolean("isInSession", isInSession)
-            .apply()
+            val isInSession = command == "START"
+            getSharedPreferences("classroom", MODE_PRIVATE).edit()
+                .putBoolean("isInSession", isInSession)
+                .apply()
 
-        updateSessionUI(isInSession)
+            updateSessionUI(isInSession)
 
-        if (isInSession) {
-            notificationManager.notify(1001, buildSessionNotification(agentMap.size))
-        } else {
-            notificationManager.cancel(1001)
+            if (isInSession) {
+                notificationManager.notify(1001, buildSessionNotification(agentMap.size))
+            } else {
+                notificationManager.cancel(1001)
+            }
         }
 
         // 체크된 기기에만 명령 전송
-        addressOrder.filter { checkedMap.getOrDefault(it, true) }.forEach { address ->
-            sendCommand(address, command)
-        }
+        val checkedAddresses = addressOrder.filter { checkedMap.getOrDefault(it, true) }
+        checkedAddresses.forEach { address -> sendCommand(address, command) }
     }
 
     private fun updateSessionUI(isInSession: Boolean) {
@@ -870,6 +920,216 @@ class MainActivity : AppCompatActivity() {
             }
             .setNegativeButton("취소", null)
             .show()
+    }
+
+    // ──────────────────────────────────────────────
+    // 허용 사이트 설정
+    // ──────────────────────────────────────────────
+
+    private fun buildSiteCommand(): String {
+        val prefs = getSharedPreferences("classroom", MODE_PRIVATE)
+        val mode  = prefs.getString("site_control_mode", "allow_all") ?: "allow_all"
+        return if (mode == "allow_all") {
+            "SET_ALLOWED_SITES|*"
+        } else {
+            val sites = prefs.getStringSet("allowed_sites", emptySet())!!
+            if (sites.isNotEmpty()) "SET_ALLOWED_SITES|" + sites.joinToString("|")
+            else "SET_ALLOWED_SITES"
+        }
+    }
+
+    private fun updateSiteIcon() {
+        val prefs = getSharedPreferences("classroom", MODE_PRIVATE)
+        val mode  = prefs.getString("site_control_mode", "allow_all") ?: "allow_all"
+        val btn   = findViewById<ImageButton>(R.id.btnSiteSettings)
+        if (mode == "restrict") {
+            btn.setColorFilter(
+                ContextCompat.getColor(this, android.R.color.holo_red_dark),
+                PorterDuff.Mode.SRC_IN
+            )
+        } else {
+            btn.clearColorFilter()
+        }
+    }
+
+    private fun showSiteSettingsDialog() {
+        val prefs      = getSharedPreferences("classroom", MODE_PRIVATE)
+        val savedSites = prefs.getStringSet("allowed_sites", emptySet())!!
+        val savedMode  = prefs.getString("site_control_mode", "allow_all") ?: "allow_all"
+        val domains    = savedSites.toMutableList()
+
+        val dp   = resources.displayMetrics.density
+        val dp4  = (4 * dp).toInt()
+        val dp8  = (8 * dp).toInt()
+        val dp12 = (12 * dp).toInt()
+
+        val rootLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp12, dp8, dp12, dp8)
+        }
+
+        // ── 라디오 버튼 ─────────────────────────────────
+        val radioGroup = RadioGroup(this).apply {
+            orientation = RadioGroup.VERTICAL
+            setPadding(0, 0, 0, dp8)
+        }
+        val rbAllowAll = RadioButton(this).apply {
+            text = "🌐 모든 사이트 허용"
+            textSize = 14f
+            id = View.generateViewId()
+        }
+        val rbRestrict = RadioButton(this).apply {
+            text = "🌐 사이트 통제"
+            textSize = 14f
+            setTextColor(Color.parseColor("#d32f2f"))
+            id = View.generateViewId()
+        }
+        radioGroup.addView(rbAllowAll)
+        radioGroup.addView(rbRestrict)
+        rootLayout.addView(radioGroup)
+
+        // ── 도메인 목록 ─────────────────────────────────
+        val domainListLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        val scrollView = ScrollView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                (200 * dp).toInt()
+            )
+            addView(domainListLayout)
+        }
+        rootLayout.addView(scrollView)
+
+        // ── 도메인 입력 행 ───────────────────────────────
+        val addRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(0, dp8, 0, dp4)
+        }
+        val etDomain = EditText(this).apply {
+            hint = "도메인 입력 (예: google.com)"
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                    android.text.InputType.TYPE_TEXT_VARIATION_URI
+        }
+        val btnAdd = Button(this).apply {
+            text = "추가"
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).also { it.marginStart = dp8 }
+        }
+        addRow.addView(etDomain)
+        addRow.addView(btnAdd)
+        rootLayout.addView(addRow)
+
+        fun setRestrictVisible(visible: Boolean) {
+            val vis = if (visible) View.VISIBLE else View.GONE
+            scrollView.visibility = vis
+            addRow.visibility     = vis
+        }
+
+        fun rebuildList() {
+            domainListLayout.removeAllViews()
+            domains.toList().forEach { domain ->
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = android.view.Gravity.CENTER_VERTICAL
+                    setPadding(0, dp4, 0, dp4)
+                }
+                val tv = TextView(this).apply {
+                    text = domain
+                    textSize = 14f
+                    layoutParams = LinearLayout.LayoutParams(
+                        0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                }
+                val btnDel = Button(this).apply {
+                    text = "삭제"
+                    setOnClickListener {
+                        domains.remove(domain)
+                        rebuildList()
+                    }
+                }
+                row.addView(tv)
+                row.addView(btnDel)
+                domainListLayout.addView(row)
+            }
+        }
+
+        rebuildList()
+
+        // 저장된 모드로 초기 상태 설정
+        if (savedMode == "restrict") {
+            radioGroup.check(rbRestrict.id)
+            setRestrictVisible(true)
+        } else {
+            radioGroup.check(rbAllowAll.id)
+            setRestrictVisible(false)
+        }
+
+        radioGroup.setOnCheckedChangeListener { _, checkedId ->
+            setRestrictVisible(checkedId == rbRestrict.id)
+        }
+
+        btnAdd.setOnClickListener {
+            val domain = etDomain.text.toString().trim().lowercase()
+            if (domain.isNotEmpty() && domain !in domains) {
+                domains.add(domain)
+                rebuildList()
+                etDomain.setText("")
+            }
+        }
+
+        // ── 버튼 행 (직접 뷰에 추가 — setPositiveButton 우회) ──
+        val buttonRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity     = android.view.Gravity.END
+            setPadding(0, dp8, 0, 0)
+        }
+        val btnCancel = Button(this).apply { text = "취소" }
+        val btnConfirm = Button(this).apply {
+            text = "확인"
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).also { it.marginStart = dp8 }
+        }
+        buttonRow.addView(btnCancel)
+        buttonRow.addView(btnConfirm)
+        rootLayout.addView(buttonRow)
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("허용 사이트 설정")
+            .setView(rootLayout)
+            .create()
+
+        btnConfirm.setOnClickListener {
+            val mode = if (radioGroup.checkedRadioButtonId == rbRestrict.id)
+                "restrict" else "allow_all"
+            prefs.edit()
+                .putString("site_control_mode", mode)
+                .putStringSet("allowed_sites", domains.toSet())
+                .apply()
+            val sites = prefs.getStringSet("allowed_sites", emptySet())!!
+            val command = if (mode == "allow_all") {
+                "SET_ALLOWED_SITES|*"
+            } else {
+                if (sites.isNotEmpty())
+                    "SET_ALLOWED_SITES|" + sites.joinToString("|")
+                else
+                    "SET_ALLOWED_SITES"
+            }
+            android.util.Log.d("SiteSettings", "확인 버튼: $command")
+            sendToAll(command)
+            updateSiteIcon()
+            Toast.makeText(this, "사이트 설정이 저장되었습니다", Toast.LENGTH_SHORT).show()
+            dialog.dismiss()
+        }
+
+        btnCancel.setOnClickListener { dialog.dismiss() }
+
+        dialog.show()
     }
 
     // ──────────────────────────────────────────────
