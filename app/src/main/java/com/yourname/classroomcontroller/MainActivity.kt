@@ -34,7 +34,7 @@ class MainActivity : AppCompatActivity() {
 
     private val DEFAULT_PACKAGES = setOf(
         "com.microsoft.office.onenote",
-        "com.yourname.classroomagent",
+        "com.teaveloper.classroomagent",
         "com.android.systemui",
         "com.google.android.inputmethod.latin",
         "com.samsung.android.honeyboard",
