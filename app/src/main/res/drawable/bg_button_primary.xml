@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_pressed="true">
+        <shape android:shape="rectangle">
+            <gradient
+                android:startColor="@color/teavel_accent_hover"
+                android:centerColor="@color/teavel_brand_violet"
+                android:endColor="@color/teavel_brand_cyan"
+                android:angle="315" />
+            <corners android:radius="14dp" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:startColor="@color/teavel_brand_indigo"
+                android:centerColor="@color/teavel_brand_violet"
+                android:endColor="@color/teavel_brand_cyan"
+                android:angle="315" />
+            <corners android:radius="14dp" />
+        </shape>
+    </item>
+</selector>

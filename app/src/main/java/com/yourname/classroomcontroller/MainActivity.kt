@@ -22,6 +22,7 @@ import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import org.java_websocket.client.WebSocketClient
 import org.java_websocket.handshake.ServerHandshake
@@ -112,14 +113,14 @@ class MainActivity : AppCompatActivity() {
     // 상태 색상
     // ──────────────────────────────────────────────
 
-    private fun statusColorFor(displayStr: String): Int = when {
-        "🚨 우회" in displayStr      -> Color.parseColor("#9c27b0")
-        "❌ 통신 끊김" in displayStr -> Color.parseColor("#d32f2f")
-        "⚠️" in displayStr          -> Color.parseColor("#e65100")
-        "대기중" in displayStr       -> Color.parseColor("#9e9e9e")
-        "연결 확인중" in displayStr  -> Color.parseColor("#9e9e9e")
-        else                         -> Color.parseColor("#2e7d32")
-    }
+    private fun statusColorFor(displayStr: String): Int = ContextCompat.getColor(this, when {
+        "🚨 우회" in displayStr      -> R.color.teavel_brand_violet
+        "❌ 통신 끊김" in displayStr -> R.color.teavel_danger
+        "⚠️" in displayStr          -> R.color.teavel_warning
+        "대기중" in displayStr       -> R.color.teavel_offline
+        "연결 확인중" in displayStr  -> R.color.teavel_offline
+        else                         -> R.color.teavel_success
+    })
 
     // ──────────────────────────────────────────────
     // 커스텀 어댑터 (CardView + 체크박스 + 상태 색상)
@@ -306,14 +307,14 @@ class MainActivity : AppCompatActivity() {
             }
             .show()
 
-        // 버튼 스타일: 허락 = 파란 배경 흰 텍스트, 거절 = 빨간 텍스트만
+        // 버튼 스타일: 허락 = Teavel accent 배경 흰 텍스트, 거절 = 빨간 텍스트만
         dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.apply {
-            setBackgroundColor(Color.parseColor("#1976d2"))
+            setBackgroundColor(ContextCompat.getColor(this@MainActivity, R.color.teavel_accent))
             setTextColor(Color.WHITE)
         }
         dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.apply {
             setBackgroundColor(Color.TRANSPARENT)
-            setTextColor(Color.parseColor("#d32f2f"))
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.teavel_danger))
         }
     }
 

@@ -1,8 +1,12 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Base application theme. -->
     <style name="Base.Theme.ClassroomController" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Customize your light theme here. -->
-        <!-- <item name="colorPrimary">@color/my_light_primary</item> -->
+        <item name="colorPrimary">@color/teavel_accent</item>
+        <item name="colorPrimaryDark">@color/teavel_accent_hover</item>
+        <item name="colorAccent">@color/teavel_brand_violet</item>
+        <item name="android:statusBarColor">@color/teavel_accent</item>
+        <item name="android:windowBackground">@drawable/bg_screen</item>
+        <item name="android:textColorPrimary">@color/teavel_ink</item>
+        <item name="android:textColorSecondary">@color/teavel_ink_muted</item>
     </style>
 
     <style name="Theme.ClassroomController" parent="Base.Theme.ClassroomController" />

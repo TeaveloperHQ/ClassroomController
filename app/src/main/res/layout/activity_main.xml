@@ -3,17 +3,16 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:background="#f5f5f5">
+    android:orientation="vertical">
 
-    <!-- ── AppBar ── -->
+    <!-- ── AppBar (Teavel gradient badge) ── -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:background="#1976d2"
+        android:background="@drawable/bg_brand_badge"
         android:elevation="4dp"
-        android:paddingBottom="12dp"
+        android:paddingBottom="16dp"
         android:fitsSystemWindows="true">
 
         <!-- Title row -->
@@ -22,19 +21,20 @@
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:paddingStart="16dp"
-            android:paddingEnd="8dp"
-            android:paddingTop="16dp"
-            android:paddingBottom="2dp">
+            android:paddingStart="20dp"
+            android:paddingEnd="12dp"
+            android:paddingTop="20dp"
+            android:paddingBottom="4dp">
 
             <TextView
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:text="교실 관리"
-                android:textColor="#FFFFFF"
-                android:textSize="20sp"
-                android:textStyle="bold"/>
+                android:textColor="@color/white"
+                android:textSize="22sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.01"/>
 
             <ImageButton
                 android:id="@+id/btnAppSettings"
@@ -43,7 +43,8 @@
                 android:layout_marginEnd="4dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:src="@drawable/ic_apps"
-                android:contentDescription="앱 설정"/>
+                android:contentDescription="앱 설정"
+                app:tint="@color/white"/>
 
             <ImageButton
                 android:id="@+id/btnSettings"
@@ -51,7 +52,8 @@
                 android:layout_height="40dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:src="@drawable/ic_settings"
-                android:contentDescription="설정"/>
+                android:contentDescription="설정"
+                app:tint="@color/white"/>
 
         </LinearLayout>
 
@@ -60,12 +62,23 @@
             android:id="@+id/tvAppBarSubtitle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:paddingStart="16dp"
-            android:paddingEnd="16dp"
-            android:paddingBottom="12dp"
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:paddingBottom="4dp"
             android:text=""
-            android:textColor="#CCffffff"
+            android:textColor="#DDFFFFFF"
             android:textSize="13sp"/>
+
+        <!-- Byline -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:paddingBottom="16dp"
+            android:text="by Teaveloper"
+            android:textColor="#AAFFFFFF"
+            android:textSize="11sp"/>
 
         <!-- 자동 종료 대기 바 -->
         <LinearLayout
@@ -73,9 +86,9 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:paddingStart="16dp"
-            android:paddingEnd="16dp"
-            android:paddingBottom="8dp"
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:paddingBottom="10dp"
             android:gravity="center_vertical"
             android:visibility="gone">
 
@@ -88,14 +101,14 @@
                 android:layout_marginEnd="10dp"
                 android:max="300"
                 android:progress="0"
-                android:progressTint="#FF9800"
-                android:progressBackgroundTint="#80FFFFFF"/>
+                android:progressTint="@color/teavel_star"
+                android:progressBackgroundTint="#55FFFFFF"/>
 
             <TextView
                 android:id="@+id/tvAutoStop"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textColor="#FFffffff"
+                android:textColor="@color/white"
                 android:textSize="11sp"
                 android:text="자동 종료 대기중"/>
 
@@ -106,31 +119,33 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:paddingStart="16dp"
-            android:paddingEnd="16dp">
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp">
 
-            <com.google.android.material.button.MaterialButton
+            <Button
                 android:id="@+id/btnStart"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
+                android:layout_height="52dp"
                 android:layout_weight="1"
-                android:layout_marginEnd="8dp"
-                android:text="🔒 수업 시작"
-                android:textColor="#d32f2f"
-                app:backgroundTint="#FFFFFF"
-                app:cornerRadius="8dp"
-                app:strokeWidth="0dp"/>
+                android:layout_marginEnd="10dp"
+                android:text="수업 시작"
+                android:textColor="@color/white"
+                android:textSize="16sp"
+                android:textAllCaps="false"
+                android:background="@drawable/bg_button_primary"
+                android:stateListAnimator="@null"/>
 
-            <com.google.android.material.button.MaterialButton
+            <Button
                 android:id="@+id/btnStop"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
+                android:layout_height="52dp"
                 android:layout_weight="1"
-                android:text="🔓 수업 종료"
-                android:textColor="#2e7d32"
-                app:backgroundTint="#FFFFFF"
-                app:cornerRadius="8dp"
-                app:strokeWidth="0dp"/>
+                android:text="수업 종료"
+                android:textColor="@color/teavel_ink"
+                android:textSize="16sp"
+                android:textAllCaps="false"
+                android:background="@drawable/bg_button_outline"
+                android:stateListAnimator="@null"/>
 
         </LinearLayout>
 
@@ -142,11 +157,10 @@
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:background="#f5f5f5"
         android:divider="@null"
         android:listSelector="@android:color/transparent"
-        android:paddingTop="4dp"
-        android:paddingBottom="4dp"
+        android:paddingTop="12dp"
+        android:paddingBottom="12dp"
         android:clipToPadding="false"/>
 
 </LinearLayout>

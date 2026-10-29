@@ -13,32 +13,34 @@
         android:layout_height="4dp"
         android:layout_gravity="center_horizontal"
         android:layout_marginTop="12dp"
-        android:layout_marginBottom="8dp"
-        android:background="#DDDDDD"/>
+        android:layout_marginBottom="12dp"
+        android:background="@color/teavel_border"/>
 
     <!-- Title -->
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="교실 설정"
-        android:textSize="18sp"
+        android:textSize="20sp"
         android:textStyle="bold"
-        android:textColor="#212121"
+        android:textColor="@color/teavel_ink"
         android:paddingStart="24dp"
         android:paddingEnd="24dp"
-        android:paddingTop="8dp"
-        android:paddingBottom="16dp"/>
+        android:paddingTop="4dp"
+        android:paddingBottom="20dp"/>
 
     <!-- Grade label -->
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="학년"
-        android:textSize="14sp"
-        android:textColor="#616161"
+        android:textSize="13sp"
+        android:textStyle="bold"
+        android:textColor="@color/teavel_ink_muted"
+        android:letterSpacing="0.05"
         android:paddingStart="24dp"
         android:paddingEnd="24dp"
-        android:paddingBottom="4dp"/>
+        android:paddingBottom="6dp"/>
 
     <Spinner
         android:id="@+id/spinnerGrade"
@@ -52,12 +54,14 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="반"
-        android:textSize="14sp"
-        android:textColor="#616161"
+        android:textSize="13sp"
+        android:textStyle="bold"
+        android:textColor="@color/teavel_ink_muted"
+        android:letterSpacing="0.05"
         android:paddingStart="24dp"
         android:paddingEnd="24dp"
-        android:paddingTop="12dp"
-        android:paddingBottom="4dp"/>
+        android:paddingTop="16dp"
+        android:paddingBottom="6dp"/>
 
     <Spinner
         android:id="@+id/spinnerClass"
@@ -67,17 +71,18 @@
         android:layout_marginEnd="24dp"/>
 
     <!-- Confirm button -->
-    <com.google.android.material.button.MaterialButton
+    <Button
         android:id="@+id/btnConfirm"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="52dp"
         android:layout_marginStart="24dp"
         android:layout_marginEnd="24dp"
-        android:layout_marginTop="24dp"
+        android:layout_marginTop="28dp"
         android:text="확인"
-        android:textColor="#FFFFFF"
-        app:backgroundTint="#1976d2"
-        app:cornerRadius="8dp"
-        app:strokeWidth="0dp"/>
+        android:textColor="@color/white"
+        android:textSize="16sp"
+        android:textAllCaps="false"
+        android:background="@drawable/bg_button_primary"
+        android:stateListAnimator="@null"/>
 
 </LinearLayout>

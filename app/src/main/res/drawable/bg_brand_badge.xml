@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <gradient
+        android:startColor="@color/teavel_brand_indigo"
+        android:centerColor="@color/teavel_brand_violet"
+        android:endColor="@color/teavel_brand_cyan"
+        android:angle="315" />
+</shape>

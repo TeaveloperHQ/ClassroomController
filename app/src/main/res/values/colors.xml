@@ -1,5 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="black">#FF000000</color>
+    <!-- Teavel brand palette (mirrors teacher-app-portal + ClassroomAgent auto-allowlist) -->
+    <color name="teavel_brand_indigo">#FF6366F1</color>
+    <color name="teavel_brand_violet">#FF8B5CF6</color>
+    <color name="teavel_brand_cyan">#FF06B6D4</color>
+    <color name="teavel_accent">#FF4F46E5</color>
+    <color name="teavel_accent_hover">#FF4338CA</color>
+    <color name="teavel_star">#FFF59E0B</color>
+    <color name="teavel_danger">#FFE11D48</color>
+    <color name="teavel_danger_soft">#FFFECDD3</color>
+    <color name="teavel_success">#FF10B981</color>
+    <color name="teavel_warning">#FFF97316</color>
+    <color name="teavel_offline">#FF94A3B8</color>
+
+    <!-- Neutrals -->
+    <color name="teavel_ink">#FF0F1226</color>
+    <color name="teavel_ink_muted">#FF64748B</color>
+    <color name="teavel_surface">#FFFFFFFF</color>
+    <color name="teavel_surface_alt">#FFF8FAFC</color>
+    <color name="teavel_border">#FFE2E8F0</color>
+
     <color name="white">#FFFFFFFF</color>
+    <color name="black">#FF000000</color>
 </resources>
