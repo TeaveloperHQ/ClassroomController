@@ -1,0 +1,42 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Teavel 브랜드 그라데이션 (indigo → violet → cyan) -->
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"   stop-color="#6366f1"/>
+      <stop offset="50%"  stop-color="#8b5cf6"/>
+      <stop offset="100%" stop-color="#06b6d4"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 라운드 사각형 배경 (Teavel 표준 rx 비율 22%) -->
+  <rect x="0" y="0" width="1024" height="1024" rx="224" fill="url(#g)"/>
+
+  <!-- X자 쇠사슬. 열쇠 주변 2링 제거 + 각 체인 양 끝으로 1셀씩 연장 (방사형 확장). -->
+  <g stroke="#ffffff" stroke-width="34" fill="none" stroke-linecap="round">
+    <!-- Chain 1 (\): 좌상 → 우하, 안쪽 2링 제거, 양쪽 끝 1셀 추가 -->
+    <ellipse cx="172" cy="172" rx="76" ry="42" transform="rotate(45 172 172)"/>
+    <ellipse cx="285" cy="285" rx="76" ry="42" transform="rotate(45 285 285)"/>
+    <ellipse cx="739" cy="739" rx="76" ry="42" transform="rotate(45 739 739)"/>
+    <ellipse cx="852" cy="852" rx="76" ry="42" transform="rotate(45 852 852)"/>
+
+    <!-- Chain 2 (/): 우상 → 좌하, 안쪽 2링 제거, 양쪽 끝 1셀 추가 -->
+    <ellipse cx="852" cy="172" rx="76" ry="42" transform="rotate(-45 852 172)"/>
+    <ellipse cx="739" cy="285" rx="76" ry="42" transform="rotate(-45 739 285)"/>
+    <ellipse cx="285" cy="739" rx="76" ry="42" transform="rotate(-45 285 739)"/>
+    <ellipse cx="172" cy="852" rx="76" ry="42" transform="rotate(-45 172 852)"/>
+  </g>
+
+  <!-- 중앙 열쇠 (세로, 상하 반전: bow 아래, 톱니 위, 흰색 솔리드) -->
+  <g fill="#ffffff" stroke="#8b5cf6" stroke-width="8" stroke-linejoin="round">
+    <!-- Bow: 외경 원 + 내경 구멍 (even-odd), 중앙 아래쪽 -->
+    <path fill-rule="evenodd"
+          d="M 512,636 m -116,0 a 116,116 0 1,0 232,0 a 116,116 0 1,0 -232,0 Z
+             M 512,636 m -58,0 a 58,58 0 1,1 116,0 a 58,58 0 1,1 -116,0 Z"/>
+    <!-- Shaft (세로) -->
+    <rect x="482" y="288" width="60" height="248" rx="12"/>
+    <!-- Tooth 1 (중간 톱니, 오른쪽) -->
+    <rect x="542" y="388" width="68" height="34" rx="7"/>
+    <!-- Tooth 2 (끝 비트, 오른쪽, 위쪽) -->
+    <rect x="542" y="296" width="92" height="52" rx="7"/>
+  </g>
+</svg>
