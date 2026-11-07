@@ -15,7 +15,12 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import org.java_websocket.client.WebSocketClient
 import org.java_websocket.handshake.ServerHandshake
+import java.io.File
+import java.io.FileWriter
 import java.net.URI
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class PollingService : Service() {
 
@@ -96,6 +101,9 @@ class PollingService : Service() {
     private var pollingStarted     = false
     // address -> last "pkg:HH:mm" key seen, for deduplication
     private val lastSuspiciousKey  = mutableMapOf<String, String>()
+    // address -> 마지막으로 파일에 저장한 BLOCK_LOG 엔트리 (중복 방지)
+    private val lastBlockEntry     = mutableMapOf<String, String>()
+    private val blockLogLock       = Any()
 
     // ──────────────────────────────────────────────
     // Lifecycle
@@ -158,6 +166,8 @@ class PollingService : Service() {
             .getBoolean("isInSession", false)
 
         addresses.forEach { address ->
+            fetchBlockLog(address)
+
             val uri    = URI("ws://$address")
             val client = object : WebSocketClient(uri) {
                 override fun onOpen(handshake: ServerHandshake) { send("STATUS") }
@@ -209,6 +219,71 @@ class PollingService : Service() {
             }
             client.connect()
         }
+    }
+
+    // ──────────────────────────────────────────────
+    // BLOCK_LOG 수집 (S Pen 오탐 튜닝용)
+    // ──────────────────────────────────────────────
+
+    private fun fetchBlockLog(address: String) {
+        val uri    = URI("ws://$address")
+        val client = object : WebSocketClient(uri) {
+            override fun onOpen(handshake: ServerHandshake) { send("BLOCK_LOG") }
+
+            override fun onMessage(message: String) {
+                try {
+                    handleBlockLog(address, message)
+                } catch (e: Exception) {
+                    android.util.Log.e("BlockLog", "처리 실패: ${e.message}")
+                }
+                close()
+            }
+
+            override fun onClose(code: Int, reason: String, remote: Boolean) {}
+            override fun onError(ex: Exception) {}
+        }
+        client.connect()
+    }
+
+    private fun handleBlockLog(address: String, message: String) {
+        if (!message.startsWith("BLOCK_LOG|")) return
+        val payload = message.removePrefix("BLOCK_LOG|")
+        if (payload.isEmpty() || payload == "empty") return
+
+        val entries = payload.split("|").filter { it.isNotBlank() }
+        if (entries.isEmpty()) return
+
+        val fresh: List<String>
+        synchronized(blockLogLock) {
+            val lastSeen = lastBlockEntry[address]
+            fresh = if (lastSeen == null) {
+                entries
+            } else {
+                val idx = entries.indexOf(lastSeen)
+                when {
+                    idx < 0 -> entries
+                    idx == entries.lastIndex -> emptyList()
+                    else -> entries.subList(idx + 1, entries.size)
+                }
+            }
+            if (fresh.isNotEmpty()) lastBlockEntry[address] = entries.last()
+        }
+
+        if (fresh.isNotEmpty()) appendBlockLog(address, fresh)
+    }
+
+    private fun appendBlockLog(address: String, entries: List<String>) {
+        val deviceName = agentMap[address] ?: address
+        val day = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        val file = File(getExternalFilesDir(null), "block_log.txt")
+        try {
+            FileWriter(file, true).use { fw ->
+                for (e in entries) fw.appendLine("$day $deviceName\t$e")
+            }
+        } catch (ex: Exception) {
+            android.util.Log.e("BlockLog", "파일 쓰기 실패: ${ex.message}")
+        }
+        for (e in entries) android.util.Log.i("BlockLog", "$deviceName\t$e")
     }
 
     private fun sendCorrection(address: String, command: String) {
